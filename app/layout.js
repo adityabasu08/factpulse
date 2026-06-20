@@ -29,7 +29,7 @@ export default function RootLayout({ children }) {
           rel="stylesheet" 
         />
       </head>
-      <body className="antialiased">
+      <body className="antialiased" suppressHydrationWarning>
         {children}
       </body>
     </html>
