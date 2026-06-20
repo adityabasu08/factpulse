@@ -13,6 +13,94 @@ function getGeminiModel() {
 }
 
 // ---------------------------------------------------------------------------
+// Generic Gemini caller – avoids code duplication
+// ---------------------------------------------------------------------------
+async function callGemini(systemPrompt, userText) {
+  const model = getGeminiModel();
+  const fullPrompt = `${systemPrompt}\n\nTEXT TO PROCESS:\n"${userText}"`;
+  const result = await model.generateContent(fullPrompt);
+  return result.response.text().trim();
+}
+
+// ---------------------------------------------------------------------------
+// Module 1: Entity Extraction
+// ---------------------------------------------------------------------------
+async function extractEntities(rumorText) {
+  const systemPrompt = `You are a precise data extraction assistant specialized in food safety. Your task is to process informal, messy social media rumors and extract the commercial brand and the generic product type.
+
+CRITICAL RULES:
+
+Output ONLY a valid JSON string. Do not include any introduction, explanation, or concluding text.
+
+If the brand is unknown or not explicitly mentioned, set the "Brand" value to "Unknown".
+
+Use the following JSON schema:
+{
+  "Brand": "Name of brand",
+  "Product Type": "Generic descriptor of the product"
+}
+
+If you cannot identify a product type, return {"Brand": "Unknown", "Product Type": "Unknown"}.`;
+
+  try {
+    const raw = await callGemini(systemPrompt, rumorText);
+    const cleaned = raw.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      Brand: parsed.Brand || "Unknown",
+      ProductType: parsed["Product Type"] || parsed.ProductType || "Unknown",
+    };
+  } catch {
+    return { Brand: "Unknown", ProductType: "Unknown" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Module 2: Explainer Route
+// ---------------------------------------------------------------------------
+async function generateExplanation(fdaResults, rumorText) {
+  const systemPrompt = `You are a responsible AI assistant. Your goal is to translate raw FDA JSON recall data into a simple, empathetic explanation for a stressed community member.
+
+CRITICAL RULES:
+
+If the FDA data is empty, say exactly: 'No active official recall has been recorded for this product.'
+
+NEVER speculate, guess, or provide medical/legal advice.
+
+If a recall is found, summarize the reason and date in exactly two sentences.
+
+Keep the tone calm, clear, and objective.
+
+If the user input is not related to a product recall, state: 'I can only assist with food and product safety recall queries.'`;
+
+  const userText = `FDA Data: ${JSON.stringify(fdaResults)}\n\nRumor: "${rumorText}"`;
+  return await callGemini(systemPrompt, userText);
+}
+
+// ---------------------------------------------------------------------------
+// Module 3: Confidence Scoring Engine (Fixes the 92% Bug)
+// ---------------------------------------------------------------------------
+async function calculateConfidence(rumorText, fdaResults) {
+  const systemPrompt = `You are a deterministic confidence scoring engine. Your task is to calculate the truth-probability of a RUMOR based strictly on provided OPENFDA DATA.
+
+CRITICAL RULES:
+
+GIBBERISH/JARGON GATE: If the RUMOR consists of random words, nonsensical characters, or is completely unrelated to product/food safety (e.g., random keyboard smash), output exactly and only: Invalid
+
+EXACT MATCH: If the OPENFDA DATA confirms the specific brand AND hazard mentioned in the RUMOR, output a score between: 90% - 100%
+
+PARTIAL MATCH: If the OPENFDA DATA confirms the product type but the brand or hazard differs, output a score between: 40% - 80%
+
+NO MATCH / EMPTY: If the OPENFDA DATA is empty ({"results": []}) or unrelated to the RUMOR, output exactly: 0%
+
+OUTPUT FORMAT:
+Output ONLY the final percentage (e.g., "95%") or the word "Invalid". Do not include your thinking process or any other text.`;
+
+  const userText = `RUMOR: "${rumorText}"\n\nOPENFDA DATA: ${JSON.stringify(fdaResults)}`;
+  return await callGemini(systemPrompt, userText);
+}
+
+// ---------------------------------------------------------------------------
 // OpenFDA helper – searches the food enforcement recall database
 // ---------------------------------------------------------------------------
 async function queryOpenFDA(product, brand) {
@@ -33,7 +121,7 @@ async function queryOpenFDA(product, brand) {
   if (!res.ok) {
     // If FDA returns a non-200 status (including 404 for no results), treat as no data
     if (res.status === 404) {
-      return null;
+      return { results: [] };
     }
     throw new Error(`OpenFDA request failed: ${res.status} ${res.statusText}`);
   }
@@ -43,7 +131,7 @@ async function queryOpenFDA(product, brand) {
 }
 
 // ---------------------------------------------------------------------------
-// POST handler – check a rumor against FDA recall data
+// POST handler – check a rumor using the 3-module pipeline
 // ---------------------------------------------------------------------------
 export async function POST(request) {
   try {
@@ -58,70 +146,43 @@ export async function POST(request) {
       );
     }
 
-    // 2. Use Gemini to extract product and brand entities from the rumor
-    const model = getGeminiModel();
-    const extractPrompt = `Extract the product name and brand name from the following text. Return ONLY a JSON object with keys "product" and "brand". Do not include any other text or markdown formatting.
+    // 2. Extract entities from the rumor
+    const extractedEntities = await extractEntities(rumorText);
+    const { Brand, ProductType } = extractedEntities;
 
-Text: "${rumorText}"`;
-
-    const extractResult = await model.generateContent(extractPrompt);
-    const extractText = extractResult.response.text().trim();
-
-    // Parse the JSON response – handle potential markdown code fences
-    let entities;
+    // 3. Build the FDA query URL and fetch results
+    let fdaResults;
     try {
-      const cleaned = extractText.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
-      entities = JSON.parse(cleaned);
+      const fdaData = await queryOpenFDA(ProductType, Brand);
+      fdaResults = fdaData && fdaData.results ? fdaData.results : [];
     } catch {
-      return new Response(
-        JSON.stringify({ error: "Failed to parse entities from Gemini response" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      fdaResults = [];
     }
 
-    const { product, brand } = entities;
-    if (!product || !brand) {
-      return new Response(
-        JSON.stringify({ error: "Gemini could not extract product and brand from the provided text" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    // 4. Calculate confidence score
+    const confidence = await calculateConfidence(rumorText, fdaResults);
 
-    // 3. Query the openFDA API
-    const fdaData = await queryOpenFDA(product, brand);
+    // 5. Generate explanation / summary
+    const summary = await generateExplanation(fdaResults, rumorText);
 
-    // 4. Build response based on whether FDA returned results
-    let status, fact, sourceLink;
+    // 6. Determine status and source link
+    const hasRecall = fdaResults.length > 0;
+    const status = hasRecall ? "recalled" : "safe";
+    const fact = hasRecall ? "FDA Recall Found" : "No Recall Found";
+    const sourceLink = hasRecall
+      ? "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts"
+      : null;
 
-    if (fdaData && fdaData.results && fdaData.results.length > 0) {
-      const result = fdaData.results[0];
-      status = "red";
-      fact = `${result.product_description} – Recall initiated: ${result.recall_initiation_date || "unknown date"}`;
-      sourceLink = `https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts`;
-    } else {
-      status = "gray";
-      fact = null;
-      sourceLink = null;
-    }
-
-    // 5. Use Gemini to generate a plain-language summary with strict guardrails
-    const summaryPrompt = `You are a fact-checking assistant. Based on the following information, produce a short plain-language summary (1-2 sentences).
-
-FDA data available: ${status === "red" ? "yes" : "no"}
-${status === "red" ? `Recall fact: ${fact}` : ""}
-
-Rules:
-- If FDA data exists, summarize the recall in 1-2 simple sentences.
-- If FDA data is null, say: "No active official recall has been recorded for this product."
-- NEVER give medical advice, consumption advice, or speculate.
-- NEVER use "I" or "my analysis".`;
-
-    const summaryResult = await model.generateContent(summaryPrompt);
-    const summary = summaryResult.response.text().trim();
-
-    // 6. Return final JSON response
+    // 7. Return final JSON response
     return new Response(
-      JSON.stringify({ status, summary, fact, sourceLink }),
+      JSON.stringify({
+        status,
+        fact,
+        summary,
+        confidence,
+        sourceLink,
+        extractedEntities,
+      }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error) {
