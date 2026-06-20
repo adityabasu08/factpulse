@@ -9,8 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+<<<<<<< HEAD
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/forms": "^0.5.11",
+=======
+    "@google/generative-ai": "^0.24.1",
+>>>>>>> e256526256a110de8dbb7e607c8ff7bdc0fe9473
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"
