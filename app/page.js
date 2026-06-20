@@ -19,6 +19,9 @@ export default function EpicureanApp() {
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus]   = useState(scanSteps[0]);
   const [showStats, setShowStats]     = useState(false);
+  const [resultData, setResultData]   = useState(null);
+  const [apiCallInProgress, setApiCallInProgress] = useState(false);
+  const [apiError, setApiError]       = useState(null);
 
   /* ── Theme init ── */
   useEffect(() => {
@@ -57,7 +60,6 @@ export default function EpicureanApp() {
         setScanStatus(scanSteps[Math.min(Math.floor(next / 18), scanSteps.length - 1)]);
         if (next >= 100) {
           clearInterval(interval);
-          setTimeout(() => setScreen('results'), 400);
           return 100;
         }
         return next;
@@ -65,6 +67,15 @@ export default function EpicureanApp() {
     }, 60);
     return () => clearInterval(interval);
   }, [screen]);
+
+  /* ── Transition to results when API responds OR on error ── */
+  useEffect(() => {
+    if (screen !== 'scanning') return;
+    if (resultData !== null || apiError !== null) {
+      // API has responded — show results immediately
+      setScreen('results');
+    }
+  }, [screen, resultData, apiError]);
 
   /* ── Stats animation ── */
   useEffect(() => {
@@ -75,7 +86,28 @@ export default function EpicureanApp() {
     setShowStats(false);
   }, [screen]);
 
-  const handleVerify  = query => { if (query.trim()) setScreen('scanning'); };
+  const handleVerify = async (query) => {
+    if (!query.trim() || apiCallInProgress) return;
+    setApiCallInProgress(true);
+    setScreen('scanning');
+    setResultData(null);
+    setApiError(null);
+    try {
+      const response = await fetch('/api/check-rumor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rumorText: query }),
+      });
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      const data = await response.json();
+      setResultData(data);
+    } catch (err) {
+      setApiError(err.message);
+      setResultData(null);
+    } finally {
+      setApiCallInProgress(false);
+    }
+  };
   const handleKeyDown = e     => { if (e.key === 'Enter') handleVerify(searchQuery); };
   const resetToHome   = ()    => { setScreen('landing'); setSearchQuery(''); };
 
@@ -230,11 +262,13 @@ export default function EpicureanApp() {
                   <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white shadow-md">
                     <span className="material-symbols-outlined text-base animate-spin" style={{ animationDuration: '2s' }}>biotech</span>
                   </div>
-                  <h3 className="font-headline-md text-xl font-bold text-on-surface">Analyzing Claim</h3>
+                  <h3 className="font-headline-md text-xl font-bold text-on-surface">{apiError ? 'Error in Analysis' : (scanProgress >= 100 ? 'Waiting for Results...' : 'Analyzing Claim')}</h3>
                 </div>
-                <p className="font-body-md text-on-surface-variant text-sm min-h-[20px] transition-all duration-200">{scanStatus}</p>
+                <p className="font-body-md text-on-surface-variant text-sm min-h-[20px] transition-all duration-200">
+                  {apiError ? apiError : (scanProgress >= 100 ? 'Finalizing analysis report...' : scanStatus)}
+                </p>
                 <div className="w-full max-w-md h-1.5 bg-surface-container rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-200 ease-out" style={{ width: `${scanProgress}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-200 ease-out" style={{ width: `${Math.min(scanProgress, 100)}%` }}></div>
                 </div>
                 <p className="font-label-sm text-on-surface-variant/50 text-xs">{Math.round(scanProgress)}%</p>
               </div>
@@ -334,10 +368,23 @@ export default function EpicureanApp() {
           <div id="results-screen" className="bg-surface-container-low transition-all duration-500 ease-in-out">
             <div className="max-w-max-width mx-auto px-margin-mobile md:px-margin-desktop py-xl">
 
+              {/* Error state — API call failed */}
+              {apiError && !resultData && (
+                <div className="minimal-card p-lg rounded-2xl border-l-4 border-l-error mb-lg">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="material-symbols-outlined text-error" style={{ fontVariationSettings: "'FILL' 1" }}>error</span>
+                    <h3 className="font-headline-md text-on-surface">Analysis Failed</h3>
+                  </div>
+                  <p className="font-body-md text-on-surface-variant">
+                    Sorry, we couldn't complete the analysis. The API encountered an error: {apiError}. Please try again.
+                  </p>
+                </div>
+              )}
+
               {/* Header */}
               <section className="mb-lg text-center md:text-left">
                 <h2 className="font-headline-xl text-headline-xl text-on-surface mb-6 max-w-4xl">
-                  &apos;{searchQuery || "Is there plastic in bread?"}&apos;
+                  '{searchQuery || "Is there plastic in bread?"}'
                 </h2>
               </section>
 
@@ -349,86 +396,133 @@ export default function EpicureanApp() {
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="material-symbols-outlined text-error" style={{ fontVariationSettings: "'FILL' 1" }}>
-                          cancel
-                        </span>
-                        <span className="font-label-md text-error uppercase font-bold tracking-wider">
-                          Verdict: False
-                        </span>
+                        {resultData && resultData.status === 'recalled' ? (
+                          <>
+                            <span className="material-symbols-outlined text-error" style={{ fontVariationSettings: "'FILL' 1" }}>
+                              cancel
+                            </span>
+                            <span className="font-label-md text-error uppercase font-bold tracking-wider">
+                              Verdict: {resultData.fact || 'Recall Found'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="material-symbols-outlined text-success" style={{ fontVariationSettings: "'FILL' 1", color: '#2e7d32' }}>
+                              check_circle
+                            </span>
+                            <span className="font-label-md uppercase font-bold tracking-wider" style={{ color: '#2e7d32' }}>
+                              Verdict: {resultData ? resultData.fact : 'No Recall Found'}
+                            </span>
+                          </>
+                        )}
                       </div>
                       <h3 className="font-headline-lg text-headline-lg text-on-surface">
-                        Highly Inaccurate
+                        {resultData && resultData.status === 'recalled' ? 'Health Risk Detected' : 'No Safety Concern'}
                       </h3>
                     </div>
                     <div className="text-right">
-                      <span className="block text-4xl font-bold text-on-surface">92%</span>
+                      <span className="block text-4xl font-bold text-on-surface">
+                        {resultData ? (
+                          resultData.confidence === 'Invalid' ? '—' : resultData.confidence
+                        ) : '—'}
+                      </span>
                       <span className="font-label-sm text-outline uppercase tracking-widest">Confidence Score</span>
                     </div>
                   </div>
 
                   <div className="confidence-bar">
-                    <div className="confidence-fill" id="main-confidence-fill" style={{ width: showStats ? '92%' : '0%' }}></div>
+                    <div className="confidence-fill" id="main-confidence-fill" style={{ 
+                      width: showStats && resultData && resultData.confidence !== 'Invalid' ? resultData.confidence : '0%',
+                      backgroundColor: resultData && resultData.status === 'recalled' ? '#d32f2f' : undefined 
+                    }}></div>
                   </div>
 
                   <p className="font-body-lg text-body-lg text-on-surface-variant leading-relaxed">
-                    Our verification system concludes that the claim of added plastic in commercial bread is <strong>false</strong>. The rumor originates from a misunderstanding of specific dough conditioners, which are chemically distinct from industrial polymers used in plastic production.
+                    {resultData ? resultData.summary : 'Analyzing your claim against FDA databases and scientific literature...'}
                   </p>
 
-                  <div className="pt-4 border-t border-outline-variant/30">
-                    <div className="flex flex-wrap gap-4">
-                      <div className="flex items-center gap-2 px-4 py-2 bg-surface-container rounded-full">
-                        <span className="material-symbols-outlined text-primary text-sm">verified_user</span>
-                        <span className="font-label-sm text-on-surface">FDA Regulated Ingredients</span>
-                      </div>
-                      <div className="flex items-center gap-2 px-4 py-2 bg-surface-container rounded-full">
-                        <span className="material-symbols-outlined text-primary text-sm">biotech</span>
-                        <span className="font-label-sm text-on-surface">Molecular Analysis Matched</span>
+                  {resultData && resultData.sourceLink && (
+                    <div className="pt-4 border-t border-outline-variant/30">
+                      <div className="flex flex-wrap gap-4">
+                        <div className="flex items-center gap-2 px-4 py-2 bg-surface-container rounded-full">
+                          <span className="material-symbols-outlined text-primary text-sm">open_in_new</span>
+                          <a href={resultData.sourceLink} target="_blank" rel="noopener noreferrer" className="font-label-sm text-primary underline">
+                            View FDA Recall Source
+                          </a>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
+
+                  {resultData && resultData.extractedEntities && (
+                    <div className="pt-4 border-t border-outline-variant/30">
+                      <div className="flex flex-wrap gap-4">
+                        {resultData.extractedEntities.Brand && resultData.extractedEntities.Brand !== 'Unknown' && (
+                          <div className="flex items-center gap-2 px-4 py-2 bg-surface-container rounded-full">
+                            <span className="material-symbols-outlined text-primary text-sm">branding_watermark</span>
+                            <span className="font-label-sm text-on-surface">Brand: {resultData.extractedEntities.Brand}</span>
+                          </div>
+                        )}
+                        {resultData.extractedEntities.ProductType && (
+                          <div className="flex items-center gap-2 px-4 py-2 bg-surface-container rounded-full">
+                            <span className="material-symbols-outlined text-primary text-sm">category</span>
+                            <span className="font-label-sm text-on-surface">Product: {resultData.extractedEntities.ProductType}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Stats aside */}
+                {/* Stats aside — showing the actual status breakdown */}
                 <div className="md:col-span-4 flex flex-col gap-gutter">
                   <div className="minimal-card p-md rounded-2xl flex-1">
                     <h4 className="font-label-md text-on-surface-variant mb-6 uppercase tracking-widest text-xs">
-                      Statistical Distribution
+                      Analysis Breakdown
                     </h4>
                     <div className="space-y-8">
+                      {resultData && resultData.extractedEntities && (
+                        <>
+                          {/* Brand confidence (placeholder using confidence) */}
+                          <div className="space-y-3">
+                            <div className="flex justify-between font-label-md text-sm">
+                              <span className="text-on-surface-variant">Identified Brand</span>
+                              <span className="text-on-surface font-semibold">{resultData.extractedEntities.Brand}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-surface-container rounded-full">
+                              <div className="h-full bg-outline-variant rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '85%' : '0%' }}></div>
+                            </div>
+                          </div>
 
-                      {/* Contains Plastic */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between font-label-md text-sm">
-                          <span className="text-on-surface-variant">Contains Plastic</span>
-                          <span className="text-on-surface font-semibold">5%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-surface-container rounded-full">
-                          <div id="stat-bar-1" className="h-full bg-outline-variant rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '5%' : '0%' }}></div>
-                        </div>
-                      </div>
+                          {/* Product Type */}
+                          <div className="space-y-3">
+                            <div className="flex justify-between font-label-md text-sm">
+                              <span className="text-primary font-bold">Product Type</span>
+                              <span className="text-primary font-bold">{resultData.extractedEntities.ProductType}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-primary-container/25 rounded-full">
+                              <div className="h-full bg-primary rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '90%' : '0%' }}></div>
+                            </div>
+                          </div>
 
-                      {/* Plastic Free */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between font-label-md text-sm">
-                          <span className="text-primary font-bold">Plastic Free</span>
-                          <span className="text-primary font-bold">92%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-primary-container/25 rounded-full">
-                          <div id="stat-bar-2" className="h-full bg-primary rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '92%' : '0%' }}></div>
-                        </div>
-                      </div>
-
-                      {/* Inconclusive */}
-                      <div className="space-y-3">
-                        <div className="flex justify-between font-label-md text-sm">
-                          <span className="text-on-surface-variant">Inconclusive</span>
-                          <span className="text-on-surface font-semibold">3%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-surface-container rounded-full">
-                          <div id="stat-bar-3" className="h-full bg-outline-variant rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '3%' : '0%' }}></div>
-                        </div>
-                      </div>
-
+                          {/* Recall found indicator */}
+                          <div className="space-y-3">
+                            <div className="flex justify-between font-label-md text-sm">
+                              <span className="text-on-surface-variant">{resultData.status === 'recalled' ? 'Recall Found' : 'No Recall'}</span>
+                              <span className="text-on-surface font-semibold">{resultData.status === 'recalled' ? 'Yes' : 'No'}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-surface-container rounded-full">
+                              <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{ 
+                                width: showStats ? (resultData.status === 'recalled' ? '100%' : '10%') : '0%',
+                                backgroundColor: resultData.status === 'recalled' ? '#d32f2f' : '#4caf50'
+                              }}></div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {!resultData && (
+                        <p className="text-on-surface-variant text-sm">Loading results...</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -439,23 +533,18 @@ export default function EpicureanApp() {
                 <div className="minimal-card p-lg rounded-2xl border-l-4 border-l-primary">
                   <div className="flex items-center gap-3 mb-6">
                     <span className="material-symbols-outlined text-primary">menu_book</span>
-                    <h3 className="font-headline-md text-on-surface">Scientific Evidence Summary</h3>
+                    <h3 className="font-headline-md text-on-surface">AI Analysis Summary</h3>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-lg font-body-md text-on-surface-variant leading-relaxed">
-                    <div className="space-y-4">
-                      <p>
-                        Analysis of over 14 regulatory databases and 2,400 chemical ingredient listings confirms that modern bread production does not involve &ldquo;plastic&rdquo; (polymers like PE or PVC). The rumor often confuses <strong className="text-on-surface">Azodicarbonamide</strong>, a legal dough conditioner, with components used in yoga mats.
-                      </p>
-                    </div>
-                    <div className="space-y-4">
-                      <p>
-                        Azodicarbonamide is FDA-approved for use as a bleaching agent and dough conditioner. While it has industrial uses, its application in food is strictly regulated and chemically distinct from consumer plastics used in construction or packaging.
-                      </p>
-                    </div>
+                  <div className="font-body-md text-on-surface-variant leading-relaxed">
+                    <p>
+                      {resultData
+                        ? resultData.summary
+                        : 'No summary available. The API may have encountered an issue.'}
+                    </p>
                   </div>
                   <div className="flex gap-4 mt-8 pt-6 border-t border-outline-variant/30">
-                    <span className="bg-[#e8f5e9] dark:bg-[#0a2010] text-[#2e7d32] dark:text-[#6fcf80] border border-[#c8e6c9] dark:border-[#1a4d25] px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest">Lab Verified</span>
-                    <span className="bg-[#e8f5e9] dark:bg-[#0a2010] text-[#2e7d32] dark:text-[#6fcf80] border border-[#c8e6c9] dark:border-[#1a4d25] px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest">Peer Reviewed</span>
+                    <span className="bg-[#e8f5e9] dark:bg-[#0a2010] text-[#2e7d32] dark:text-[#6fcf80] border border-[#c8e6c9] dark:border-[#1a4d25] px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest">AI Generated</span>
+                    <span className="bg-[#fff3e0] dark:bg-[#1a1500] text-[#e65100] dark:text-[#ffb74d] border border-[#ffe0b2] dark:border-[#3a2500] px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest">FDA Referenced</span>
                   </div>
                 </div>
               </section>
@@ -465,15 +554,15 @@ export default function EpicureanApp() {
                 <div className="flex items-center justify-between mb-8">
                   <div className="flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary/60">hub</span>
-                    <h3 className="font-label-md text-on-surface uppercase tracking-widest text-sm">Verified Entities</h3>
+                    <h3 className="font-label-md text-on-surface uppercase tracking-widest text-sm">Data Sources</h3>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-gutter">
                   {[
-                    { icon: 'verified',  label: 'U.S. FDA',     sub: 'Regulatory' },
-                    { icon: 'public',    label: 'WHO',          sub: 'Guidelines' },
-                    { icon: 'science',   label: 'Nature Food',  sub: 'Journal' },
-                    { icon: 'policy',    label: 'EFSA',         sub: 'EU Safety' },
+                    { icon: 'verified',  label: 'U.S. FDA',     sub: 'Enforcement' },
+                    { icon: 'public',    label: 'OpenFDA',      sub: 'API Database' },
+                    { icon: 'smart_toy', label: 'Gemini AI',    sub: 'Analysis' },
+                    { icon: 'policy',    label: 'Recall Data',  sub: 'Regulatory' },
                   ].map(({ icon, label, sub }) => (
                     <div key={label} className="minimal-card p-6 rounded-xl text-center">
                       <span className="material-symbols-outlined text-primary mb-3 block">{icon}</span>
@@ -492,9 +581,6 @@ export default function EpicureanApp() {
                   className="primary-gradient text-white px-10 py-4 rounded-xl font-label-md shadow-sm active:scale-95"
                 >
                   Verify Another Rumor
-                </button>
-                <button className="bg-surface-container-lowest border border-outline-variant text-on-surface px-10 py-4 rounded-xl font-label-md hover:bg-surface-container transition-all active:scale-95">
-                  Share Full Report
                 </button>
               </section>
 

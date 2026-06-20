@@ -1,40 +1,54 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// app/api/check-rumor/route.js
+import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
 
-// ---------------------------------------------------------------------------
-// Gemini helper – returns a configured generative model instance
-// ---------------------------------------------------------------------------
-function getGeminiModel() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing GEMINI_API_KEY environment variable");
-  }
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// Force load .env.local for development
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config({ path: resolve(process.cwd(), '.env.local') });
 }
 
-// ---------------------------------------------------------------------------
-// Generic Gemini caller – avoids code duplication
-// ---------------------------------------------------------------------------
-async function callGemini(systemPrompt, userText) {
-  const model = getGeminiModel();
-  const fullPrompt = `${systemPrompt}\n\nTEXT TO PROCESS:\n"${userText}"`;
-  const result = await model.generateContent(fullPrompt);
-  return result.response.text().trim();
+// Initialize Groq client with explicit error checking
+const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
+
+console.log('🔑 Environment check:');
+console.log('  - GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Found' : '❌ Not found');
+console.log('  - OPENFDA_API_KEY:', process.env.OPENFDA_API_KEY ? '✅ Found' : '❌ Not found');
+
+if (!apiKey) {
+  throw new Error('Missing Groq API key. Please set GROQ_API_KEY in .env.local');
 }
 
-// ---------------------------------------------------------------------------
-// Module 1: Entity Extraction
-// ---------------------------------------------------------------------------
+const groq = new OpenAI({
+  baseURL: 'https://api.groq.com/openai/v1',
+  apiKey: apiKey,
+});
+
+const MODEL = 'llama-3.3-70b-versatile';
+
+// Helper to call Groq with a system prompt and user input
+async function callLLM(systemPrompt, userText) {
+  const response = await groq.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userText },
+    ],
+    temperature: 0.1,
+  });
+  return response.choices[0].message.content.trim();
+}
+
+// MODULE 1: ENTITY EXTRACTION
 async function extractEntities(rumorText) {
   const systemPrompt = `You are a precise data extraction assistant specialized in food safety. Your task is to process informal, messy social media rumors and extract the commercial brand and the generic product type.
 
 CRITICAL RULES:
-
-Output ONLY a valid JSON string. Do not include any introduction, explanation, or concluding text.
-
-If the brand is unknown or not explicitly mentioned, set the "Brand" value to "Unknown".
-
-Use the following JSON schema:
+1. Output ONLY a valid JSON string. Do not include any introduction, explanation, or concluding text.
+2. If the brand is unknown or not explicitly mentioned, set the "Brand" value to "Unknown".
+3. Use the following JSON schema:
 {
   "Brand": "Name of brand",
   "Product Type": "Generic descriptor of the product"
@@ -42,154 +56,194 @@ Use the following JSON schema:
 
 If you cannot identify a product type, return {"Brand": "Unknown", "Product Type": "Unknown"}.`;
 
+  const raw = await callLLM(systemPrompt, rumorText);
   try {
-    const raw = await callGemini(systemPrompt, rumorText);
-    const cleaned = raw.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
-    return {
-      Brand: parsed.Brand || "Unknown",
-      ProductType: parsed["Product Type"] || parsed.ProductType || "Unknown",
-    };
+    return JSON.parse(raw);
   } catch {
-    return { Brand: "Unknown", ProductType: "Unknown" };
+    return { Brand: 'Unknown', ProductType: 'Unknown' };
   }
 }
 
-// ---------------------------------------------------------------------------
-// Module 2: Explainer Route
-// ---------------------------------------------------------------------------
+// MODULE 2: EXPLAINER ROUTE
 async function generateExplanation(fdaResults, rumorText) {
   const systemPrompt = `You are a responsible AI assistant. Your goal is to translate raw FDA JSON recall data into a simple, empathetic explanation for a stressed community member.
 
 CRITICAL RULES:
+1. If the FDA data is empty, say exactly: 'No active official recall has been recorded for this product.'
+2. NEVER speculate, guess, or provide medical/legal advice. 
+3. If a recall is found, summarize the reason and date in exactly two sentences.
+4. Keep the tone calm, clear, and objective.
+5. If the user input is not related to a product recall, state: 'I can only assist with food and product safety recall queries.'`;
 
-If the FDA data is empty, say exactly: 'No active official recall has been recorded for this product.'
-
-NEVER speculate, guess, or provide medical/legal advice.
-
-If a recall is found, summarize the reason and date in exactly two sentences.
-
-Keep the tone calm, clear, and objective.
-
-If the user input is not related to a product recall, state: 'I can only assist with food and product safety recall queries.'`;
-
-  const userText = `FDA Data: ${JSON.stringify(fdaResults)}\n\nRumor: "${rumorText}"`;
-  return await callGemini(systemPrompt, userText);
+  const fdaString = JSON.stringify(fdaResults, null, 2);
+  const userPrompt = `RUMOR: ${rumorText}\n\nFDA DATA: ${fdaString}`;
+  return await callLLM(systemPrompt, userPrompt);
 }
 
-// ---------------------------------------------------------------------------
-// Module 3: Confidence Scoring Engine (Fixes the 92% Bug)
-// ---------------------------------------------------------------------------
-async function calculateConfidence(rumorText, fdaResults) {
-  const systemPrompt = `You are a deterministic confidence scoring engine. Your task is to calculate the truth-probability of a RUMOR based strictly on provided OPENFDA DATA.
-
-CRITICAL RULES:
-
-GIBBERISH/JARGON GATE: If the RUMOR consists of random words, nonsensical characters, or is completely unrelated to product/food safety (e.g., random keyboard smash), output exactly and only: Invalid
-
-EXACT MATCH: If the OPENFDA DATA confirms the specific brand AND hazard mentioned in the RUMOR, output a score between: 90% - 100%
-
-PARTIAL MATCH: If the OPENFDA DATA confirms the product type but the brand or hazard differs, output a score between: 40% - 80%
-
-NO MATCH / EMPTY: If the OPENFDA DATA is empty ({"results": []}) or unrelated to the RUMOR, output exactly: 0%
-
-OUTPUT FORMAT:
-Output ONLY the final percentage (e.g., "95%") or the word "Invalid". Do not include your thinking process or any other text.`;
-
-  const userText = `RUMOR: "${rumorText}"\n\nOPENFDA DATA: ${JSON.stringify(fdaResults)}`;
-  return await callGemini(systemPrompt, userText);
-}
-
-// ---------------------------------------------------------------------------
-// OpenFDA helper – searches the food enforcement recall database
-// ---------------------------------------------------------------------------
-async function queryOpenFDA(product, brand) {
-  const apiKey = process.env.OPENFDA_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing OPENFDA_API_KEY environment variable");
+// MODULE 3: DETERMINISTIC CONFIDENCE SCORING ENGINE (No LLM)
+async function calculateConfidence(rumorText, fdaResults, Brand, ProductType) {
+  // Gibberish detection: check if rumor is mostly non-alphabetic characters or very short
+  const stripped = rumorText.replace(/\s/g, '');
+  const alphaCount = (stripped.match(/[a-zA-Z]/g) || []).length;
+  const gibberishRatio = stripped.length > 0 ? 1 - alphaCount / stripped.length : 1;
+  if (gibberishRatio > 0.7 || stripped.length < 3) {
+    return 'Invalid';
   }
 
-  const query = `product_description:${encodeURIComponent(product)} AND brand_name:${encodeURIComponent(brand)}`;
-  const url = `https://api.fda.gov/food/enforcement.json?search=${query}&limit=1`;
-
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
-
-  if (!res.ok) {
-    // If FDA returns a non-200 status (including 404 for no results), treat as no data
-    if (res.status === 404) {
-      return { results: [] };
+  // Non-recall query detection: common irrelevant queries that are not about product recalls
+  const lowerRumor = rumorText.toLowerCase();
+  const nonRecallPatterns = [
+    'does meat contain protein',
+    'is meat healthy',
+    'what is',
+    'how to',
+    'define',
+    'tell me about',
+  ];
+  for (const pattern of nonRecallPatterns) {
+    if (lowerRumor.includes(pattern)) {
+      return '0%';
     }
-    throw new Error(`OpenFDA request failed: ${res.status} ${res.statusText}`);
   }
 
-  const data = await res.json();
-  return data;
+  // No results from FDA
+  if (fdaResults.length === 0) {
+    return '0%';
+  }
+
+  // Check if any FDA result contains the Brand (case-insensitive)
+  if (Brand !== 'Unknown') {
+    const brandLower = Brand.toLowerCase();
+    for (const result of fdaResults) {
+      const productDesc = (result.product_description || '').toLowerCase();
+      const brandName = (result.brand_name || '').toLowerCase();
+      if (productDesc.includes(brandLower) || brandName.includes(brandLower)) {
+        return '95%';
+      }
+    }
+  }
+
+  // Check if ProductType appears in results (brand unknown fallback)
+  if (ProductType !== 'Unknown') {
+    const typeLower = ProductType.toLowerCase();
+    for (const result of fdaResults) {
+      const productDesc = (result.product_description || '').toLowerCase();
+      if (productDesc.includes(typeLower)) {
+        return '70%';
+      }
+    }
+  }
+
+  // Partial match fallback
+  return '50%';
 }
 
-// ---------------------------------------------------------------------------
-// POST handler – check a rumor using the 3-module pipeline
-// ---------------------------------------------------------------------------
+// MAIN API ROUTE
 export async function POST(request) {
   try {
-    // 1. Parse and validate input
-    const body = await request.json();
-    const { rumorText } = body;
+    const { rumorText } = await request.json();
 
-    if (!rumorText || typeof rumorText !== "string" || rumorText.trim().length === 0) {
-      return new Response(
-        JSON.stringify({ error: "rumorText is required and must be a non-empty string" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+    if (!rumorText || rumorText.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Please provide a rumor to check.' },
+        { status: 400 }
       );
     }
 
-    // 2. Extract entities from the rumor
-    const extractedEntities = await extractEntities(rumorText);
-    const { Brand, ProductType } = extractedEntities;
+    // Step 1: Extract entities
+    const { Brand, ProductType } = await extractEntities(rumorText);
 
-    // 3. Build the FDA query URL and fetch results
-    let fdaResults;
-    try {
-      const fdaData = await queryOpenFDA(ProductType, Brand);
-      fdaResults = fdaData && fdaData.results ? fdaData.results : [];
-    } catch {
-      fdaResults = [];
+    // Step 2: Query FDA — Multi-stage search strategy
+    let fdaResults = [];
+    let usedUrl = '';
+
+    // Stage 1: Exact match using product_description
+    const exactQuery = `"${Brand} ${ProductType}"`.trim();
+    const exactUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:${encodeURIComponent(exactQuery)}&limit=5`;
+
+    let response = await fetch(exactUrl, {
+      headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      fdaResults = data.results || [];
+      usedUrl = exactUrl;
+      console.log('📊 Stage 1 (exact):', fdaResults.length, 'results');
     }
 
-    // 4. Calculate confidence score
-    const confidence = await calculateConfidence(rumorText, fdaResults);
+    // Stage 2: If no results, try brand_name field only (if Brand is known)
+    if (fdaResults.length === 0 && Brand !== 'Unknown') {
+      const brandUrl = `https://api.fda.gov/food/enforcement.json?search=brand_name:"${encodeURIComponent(Brand)}"&limit=5`;
+      response = await fetch(brandUrl, {
+        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        fdaResults = data.results || [];
+        usedUrl = brandUrl;
+        console.log('📊 Stage 2 (brand_name):', fdaResults.length, 'results');
+      }
+    }
 
-    // 5. Generate explanation / summary
-    const summary = await generateExplanation(fdaResults, rumorText);
+    // Stage 3: If still no results, try product_description with just the Brand
+    if (fdaResults.length === 0 && Brand !== 'Unknown') {
+      const brandOnlyUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(Brand)}"&limit=5`;
+      response = await fetch(brandOnlyUrl, {
+        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        fdaResults = data.results || [];
+        usedUrl = brandOnlyUrl;
+        console.log('📊 Stage 3 (product_description brand only):', fdaResults.length, 'results');
+      }
+    }
 
-    // 6. Determine status and source link
-    const hasRecall = fdaResults.length > 0;
-    const status = hasRecall ? "recalled" : "safe";
-    const fact = hasRecall ? "FDA Recall Found" : "No Recall Found";
-    const sourceLink = hasRecall
-      ? "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts"
-      : null;
+    // Stage 4: If still nothing, try product_description with just the Product Type (e.g., "peanut butter")
+    if (fdaResults.length === 0 && ProductType !== 'Unknown') {
+      const typeUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(ProductType)}"&limit=5`;
+      response = await fetch(typeUrl, {
+        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        fdaResults = data.results || [];
+        usedUrl = typeUrl;
+        console.log('📊 Stage 4 (product_description product type):', fdaResults.length, 'results');
+      }
+    }
 
-    // 7. Return final JSON response
-    return new Response(
-      JSON.stringify({
-        status,
-        fact,
-        summary,
-        confidence,
-        sourceLink,
-        extractedEntities,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+    // Log the final result
+    console.log('🔍 FDA Final - Found', fdaResults.length, 'results');
+    if (fdaResults.length > 0) {
+      console.log('📄 First result product_description:', fdaResults[0].product_description);
+    }
+
+    // Step 3: Calculate Confidence Score (deterministic)
+    const confidenceScore = await calculateConfidence(rumorText, fdaResults, Brand, ProductType);
+
+    // Step 4: Generate Explanation
+    const explanation = await generateExplanation(fdaResults, rumorText);
+
+    // Step 5: Return response
+    const isRecalled = fdaResults.length > 0;
+
+    return NextResponse.json({
+      status: isRecalled ? 'recalled' : 'safe',
+      fact: isRecalled ? 'FDA Recall Found' : 'No Recall Found',
+      summary: explanation,
+      confidence: confidenceScore,
+      sourceLink: isRecalled
+        ? 'https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts'
+        : null,
+      extractedEntities: { Brand, ProductType },
+    });
   } catch (error) {
-    console.error("check-rumor API error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error", details: error.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+    console.error('API Error:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again.' },
+      { status: 500 }
     );
   }
 }
