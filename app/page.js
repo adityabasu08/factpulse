@@ -218,42 +218,111 @@ export default function EpicureanApp() {
         )}
 
         {/* ════════════════════════════════
-            2. SCANNING SCREEN
+            2. SCANNING SCREEN — Skeleton Loader
            ════════════════════════════════ */}
         {screen === 'scanning' && (
-          <div id="scanning-screen" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-surface/95 backdrop-blur-md transition-all duration-500 ease-out">
-            <div className="max-w-sm w-full mx-auto px-8 py-12 text-center bg-surface-container-low/80 backdrop-blur-sm rounded-3xl border border-outline-variant/30 shadow-xl space-y-8">
+          <div id="scanning-screen" className="bg-surface-container-low transition-all duration-500 ease-in-out min-h-screen">
+            <div className="max-w-max-width mx-auto px-margin-mobile md:px-margin-desktop py-xl">
 
-              {/* Radar animation */}
-              <div className="relative w-32 h-32 mx-auto flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full border border-primary/20 animate-ping"></div>
-                <div className="absolute inset-4 rounded-full border border-primary/40 animate-pulse"></div>
-                <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white shadow-xl relative z-10">
-                  <span className="material-symbols-outlined text-3xl animate-spin" style={{ animationDuration: '2.5s' }}>
-                    biotech
-                  </span>
+              {/* Scanning status bar */}
+              <div className="mb-lg flex flex-col items-center text-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white shadow-md">
+                    <span className="material-symbols-outlined text-base animate-spin" style={{ animationDuration: '2s' }}>biotech</span>
+                  </div>
+                  <h3 className="font-headline-md text-xl font-bold text-on-surface">Analyzing Claim</h3>
+                </div>
+                <p className="font-body-md text-on-surface-variant text-sm min-h-[20px] transition-all duration-200">{scanStatus}</p>
+                <div className="w-full max-w-md h-1.5 bg-surface-container rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-200 ease-out" style={{ width: `${scanProgress}%` }}></div>
+                </div>
+                <p className="font-label-sm text-on-surface-variant/50 text-xs">{Math.round(scanProgress)}%</p>
+              </div>
+
+              {/* Skeleton — mirrors results page layout */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-gutter mb-xl">
+
+                {/* Verdict card skeleton */}
+                <div className="md:col-span-8 minimal-card p-lg rounded-2xl flex flex-col gap-6">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-3 flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="skeleton-bone-circle w-5 h-5"></div>
+                        <div className="skeleton-bone h-4 w-28"></div>
+                      </div>
+                      <div className="skeleton-bone h-7 w-48"></div>
+                    </div>
+                    <div className="text-right space-y-2">
+                      <div className="skeleton-bone h-10 w-16 ml-auto"></div>
+                      <div className="skeleton-bone h-3 w-24 ml-auto"></div>
+                    </div>
+                  </div>
+                  <div className="skeleton-bone h-2 w-full rounded-full"></div>
+                  <div className="space-y-3">
+                    <div className="skeleton-bone h-4 w-full"></div>
+                    <div className="skeleton-bone h-4 w-11/12"></div>
+                    <div className="skeleton-bone h-4 w-3/4"></div>
+                  </div>
+                  <div className="pt-4 border-t border-outline-variant/20">
+                    <div className="flex gap-3">
+                      <div className="skeleton-bone h-8 w-44 rounded-full"></div>
+                      <div className="skeleton-bone h-8 w-52 rounded-full"></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats sidebar skeleton */}
+                <div className="md:col-span-4 flex flex-col gap-gutter">
+                  <div className="minimal-card p-md rounded-2xl flex-1">
+                    <div className="skeleton-bone h-3 w-36 mb-8"></div>
+                    <div className="space-y-8">
+                      {[1, 2, 3].map(i => (
+                        <div key={i} className="space-y-3">
+                          <div className="flex justify-between">
+                            <div className="skeleton-bone h-3 w-24"></div>
+                            <div className="skeleton-bone h-3 w-8"></div>
+                          </div>
+                          <div className="skeleton-bone h-1.5 w-full rounded-full"></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <h3 className="font-headline-md text-2xl font-bold text-on-surface" id="scan-title">
-                  Analyzing Safety Claim
-                </h3>
-                <p className="font-body-md text-on-surface-variant transition-all duration-200 min-h-[24px]" id="scan-status">
-                  {scanStatus}
-                </p>
+              {/* Evidence section skeleton */}
+              <div className="minimal-card p-lg rounded-2xl border-l-4 border-l-outline-variant/40 mb-xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="skeleton-bone-circle w-6 h-6"></div>
+                  <div className="skeleton-bone h-5 w-56"></div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
+                  <div className="space-y-3">
+                    <div className="skeleton-bone h-4 w-full"></div>
+                    <div className="skeleton-bone h-4 w-11/12"></div>
+                    <div className="skeleton-bone h-4 w-5/6"></div>
+                    <div className="skeleton-bone h-4 w-3/4"></div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="skeleton-bone h-4 w-full"></div>
+                    <div className="skeleton-bone h-4 w-10/12"></div>
+                    <div className="skeleton-bone h-4 w-4/5"></div>
+                    <div className="skeleton-bone h-4 w-2/3"></div>
+                  </div>
+                </div>
               </div>
 
-              {/* Progress bar */}
-              <div className="w-full h-2 bg-surface-container rounded-full overflow-hidden">
-                <div
-                  id="scan-progress-fill"
-                  className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-200 ease-out"
-                  style={{ width: `${scanProgress}%` }}
-                ></div>
+              {/* Source cards skeleton */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-gutter">
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="minimal-card p-6 rounded-xl flex flex-col items-center gap-3">
+                    <div className="skeleton-bone-circle w-8 h-8"></div>
+                    <div className="skeleton-bone h-3.5 w-20"></div>
+                    <div className="skeleton-bone h-2.5 w-14"></div>
+                  </div>
+                ))}
               </div>
 
-              <p className="font-label-sm text-on-surface-variant/60">{Math.round(scanProgress)}% complete</p>
             </div>
           </div>
         )}
@@ -267,9 +336,6 @@ export default function EpicureanApp() {
 
               {/* Header */}
               <section className="mb-lg text-center md:text-left">
-                <span className="font-label-md text-label-md text-primary/70 tracking-[0.2em] uppercase mb-2 block">
-                  Investigation #8492
-                </span>
                 <h2 className="font-headline-xl text-headline-xl text-on-surface mb-6 max-w-4xl">
                   &apos;{searchQuery || "Is there plastic in bread?"}&apos;
                 </h2>
