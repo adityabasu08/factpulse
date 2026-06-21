@@ -229,7 +229,7 @@ export default function EpicureanApp() {
             2. SCANNING SCREEN — Skeleton Loader
            ════════════════════════════════ */}
         {screen === 'scanning' && (
-          <div id="scanning-screen" className="bg-surface-container-low transition-all duration-500 ease-in-out min-h-screen">
+          <div id="scanning-screen" className="bg-background transition-colors duration-500 ease-in-out min-h-screen">
             <div className="max-w-max-width mx-auto px-margin-mobile md:px-margin-desktop py-xl">
               <div className="mb-lg flex flex-col items-center text-center gap-4">
                 <div className="flex items-center gap-3">
@@ -328,7 +328,7 @@ export default function EpicureanApp() {
             3. RESULTS SCREEN
            ════════════════════════════════ */}
         {screen === 'results' && (
-          <div id="results-screen" className="bg-surface-container-low transition-all duration-500 ease-in-out">
+          <div id="results-screen" className="bg-background transition-colors duration-500 ease-in-out">
             <div className="max-w-max-width mx-auto px-margin-mobile md:px-margin-desktop py-xl">
 
               {apiError && !resultData && (
@@ -349,38 +349,43 @@ export default function EpicureanApp() {
                 </h2>
               </section>
 
-              {/* Invalid Response */}
+              {/* Invalid Response — Minimal Flat Design */}
               {resultData && (resultData.status === 'invalid' || resultData.status === 'inappropriate') && (
-                <div className="flex items-center justify-center min-h-[60vh] px-4">
-                  <div className="w-full max-w-md p-6 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-xl">
-                    
-                    {/* Confidence Score */}
-                    <div className="flex flex-col items-center justify-center">
-                      <div className="flex items-center justify-center w-40 h-40 rounded-full border-4 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
-                        <span className="text-4xl font-bold text-gray-400 dark:text-gray-500">0%</span>
+                <div className="flex items-center justify-center w-full px-4">
+                  <div className="w-full max-w-md p-8 backdrop-blur-xl rounded-2xl border border-outline-variant/30">
+
+                    {/* Confidence Score — Large Circular Badge */}
+                    <div className="flex flex-col items-center justify-center w-full">
+                      <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
+                        <div className="text-center">
+                          <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">0%</span>
+                          <p className="text-xs text-on-surface-variant mt-1 tracking-wide">Confidence Score</p>
+                        </div>
                       </div>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Evidence Strength</p>
                     </div>
 
-                    {/* Agrees/Disagrees/Inconclusive */}
-                    <div className="flex justify-around mt-6">
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-green-400 dark:text-green-500">0%</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Agrees</p>
+                    {/* Spacer */}
+                    <div className="mt-10"></div>
+
+                    {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
+                    <div className="flex justify-center gap-10">
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-green-500 dark:text-green-400">0%</span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Agrees</span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-red-400 dark:text-red-500">0%</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Disagrees</p>
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-red-500 dark:text-red-400">0%</span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Disagrees</span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-500">100%</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Inconclusive</p>
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">100%</span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Inconclusive</span>
                       </div>
                     </div>
 
                     {/* Source Count */}
-                    <div className="text-center mt-4">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <div className="text-center mt-8">
+                      <p className="text-sm text-on-surface-variant whitespace-nowrap">
                         0 out of 8 sources agree
                       </p>
                     </div>
@@ -389,46 +394,51 @@ export default function EpicureanApp() {
                 </div>
               )}
 
-              {/* Results Section */}
+              {/* Results Section — Minimal Flat Design */}
               {resultData && resultData.status !== 'invalid' && resultData.status !== 'inappropriate' && (
-                <div className="flex items-center justify-center min-h-[60vh] px-4">
-                  <div className="w-full max-w-md p-6 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-xl">
-                    
-                    {/* Confidence Score */}
-                    <div className="flex flex-col items-center justify-center">
-                      <div className="flex items-center justify-center w-40 h-40 rounded-full border-4 border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
-                        <span className="text-4xl font-bold text-blue-600 dark:text-blue-400">
-                          {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
-                        </span>
+                <div className="flex items-center justify-center w-full px-4">
+                  <div className="w-full max-w-md p-8 backdrop-blur-xl rounded-2xl border border-outline-variant/30">
+
+                    {/* Confidence Score — Large Circular Badge */}
+                    <div className="flex flex-col items-center justify-center w-full">
+                      <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
+                        <div className="text-center">
+                          <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">
+                            {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
+                          </span>
+                          <p className="text-xs text-on-surface-variant mt-1 tracking-wide">Confidence Score</p>
+                        </div>
                       </div>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Evidence Strength</p>
                     </div>
 
-                    {/* Agrees/Disagrees/Inconclusive */}
-                    <div className="flex justify-around mt-6">
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {/* Spacer */}
+                    <div className="mt-10"></div>
+
+                    {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
+                    <div className="flex justify-center gap-10">
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-green-500 dark:text-green-400">
                           {resultData.agrees !== undefined ? `${resultData.agrees}%` : '0%'}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Agrees</p>
+                        </span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Agrees</span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-red-500 dark:text-red-400">
                           {resultData.disagrees !== undefined ? `${resultData.disagrees}%` : '0%'}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Disagrees</p>
+                        </span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Disagrees</span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                      <div className="flex flex-col items-center">
+                        <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">
                           {resultData.inconclusive !== undefined ? `${resultData.inconclusive}%` : '0%'}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Inconclusive</p>
+                        </span>
+                        <span className="text-xs text-on-surface-variant mt-0.5">Inconclusive</span>
                       </div>
                     </div>
 
-                    {/* Source Count - properly spaced */}
-                    <div className="text-center mt-4">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {/* Source Count */}
+                    <div className="text-center mt-8">
+                      <p className="text-sm text-on-surface-variant whitespace-nowrap">
                         {resultData.sourcesWithMatches || 0} out of {resultData.totalSourcesChecked || 8} sources agree
                       </p>
                     </div>

@@ -3,12 +3,11 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { XMLParser } from 'fast-xml-parser';
 
-// Force load .env.local for development
-import dotenv from 'dotenv';
-import { resolve } from 'path';
+// Next.js automatically loads .env.local — no manual dotenv config needed
 
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: resolve(process.cwd(), '.env.local') });
+// Test GET handler — confirms the route file loads correctly
+export async function GET() {
+  return new Response('API is working!', { status: 200 });
 }
 
 // Initialize Groq client with explicit error checking
@@ -18,13 +17,9 @@ console.log('🔑 Environment check:');
 console.log('  - GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Found' : '❌ Not found');
 console.log('  - OPENFDA_API_KEY:', process.env.OPENFDA_API_KEY ? '✅ Found' : '❌ Not found');
 
-if (!apiKey) {
-  throw new Error('Missing Groq API key. Please set GROQ_API_KEY in .env.local');
-}
-
 const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
-  apiKey: apiKey,
+  apiKey: apiKey || '',
 });
 
 const MODEL = 'llama-3.1-8b-instant';
