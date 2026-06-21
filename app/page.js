@@ -307,16 +307,22 @@ export default function EpicureanApp() {
 
                 {/* Stats sidebar skeleton */}
                 <div className="md:col-span-4 flex flex-col gap-gutter">
-                  <div className="minimal-card p-md rounded-2xl flex-1">
-                    <div className="skeleton-bone h-3 w-36 mb-8"></div>
-                    <div className="space-y-8">
+                  <div className="minimal-card p-6 rounded-2xl flex flex-col gap-6">
+                    <div className="skeleton-bone h-3 w-36"></div>
+                    {/* Circular score skeleton */}
+                    <div className="flex flex-col items-center py-4 border-b border-outline-variant/20 gap-3">
+                      <div className="skeleton-bone-circle w-28 h-28"></div>
+                      <div className="skeleton-bone h-3 w-24"></div>
+                    </div>
+                    {/* Entity rows skeleton */}
+                    <div className="flex flex-col gap-5">
                       {[1, 2, 3].map(i => (
-                        <div key={i} className="space-y-3">
-                          <div className="flex justify-between">
-                            <div className="skeleton-bone h-3 w-24"></div>
-                            <div className="skeleton-bone h-3 w-8"></div>
+                        <div key={i} className="flex items-center gap-3">
+                          <div className="skeleton-bone-circle w-8 h-8 flex-shrink-0"></div>
+                          <div className="flex-1 space-y-2">
+                            <div className="skeleton-bone h-2 w-16"></div>
+                            <div className="skeleton-bone h-3.5 w-28"></div>
                           </div>
-                          <div className="skeleton-bone h-1.5 w-full rounded-full"></div>
                         </div>
                       ))}
                     </div>
@@ -474,56 +480,100 @@ export default function EpicureanApp() {
                   )}
                 </div>
 
-                {/* Stats aside — showing the actual status breakdown */}
+                {/* Stats aside */}
                 <div className="md:col-span-4 flex flex-col gap-gutter">
-                  <div className="minimal-card p-md rounded-2xl flex-1">
-                    <h4 className="font-label-md text-on-surface-variant mb-6 uppercase tracking-widest text-xs">
+                  <div className="minimal-card p-6 rounded-2xl flex flex-col gap-6">
+                    <h4 className="font-label-md text-on-surface-variant uppercase tracking-widest text-xs">
                       Analysis Breakdown
                     </h4>
-                    <div className="space-y-8">
-                      {resultData && resultData.extractedEntities && (
-                        <>
-                          {/* Brand confidence (placeholder using confidence) */}
-                          <div className="space-y-3">
-                            <div className="flex justify-between font-label-md text-sm">
-                              <span className="text-on-surface-variant">Identified Brand</span>
-                              <span className="text-on-surface font-semibold">{resultData.extractedEntities.Brand}</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-surface-container rounded-full">
-                              <div className="h-full bg-outline-variant rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '85%' : '0%' }}></div>
-                            </div>
-                          </div>
 
-                          {/* Product Type */}
-                          <div className="space-y-3">
-                            <div className="flex justify-between font-label-md text-sm">
-                              <span className="text-primary font-bold">Product Type</span>
-                              <span className="text-primary font-bold">{resultData.extractedEntities.ProductType}</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-primary-container/25 rounded-full">
-                              <div className="h-full bg-primary rounded-full transition-all duration-1000 ease-out" style={{ width: showStats ? '90%' : '0%' }}></div>
-                            </div>
-                          </div>
-
-                          {/* Recall found indicator */}
-                          <div className="space-y-3">
-                            <div className="flex justify-between font-label-md text-sm">
-                              <span className="text-on-surface-variant">{resultData.status === 'recalled' ? 'Recall Found' : 'No Recall'}</span>
-                              <span className="text-on-surface font-semibold">{resultData.status === 'recalled' ? 'Yes' : 'No'}</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-surface-container rounded-full">
-                              <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{ 
-                                width: showStats ? (resultData.status === 'recalled' ? '100%' : '10%') : '0%',
-                                backgroundColor: resultData.status === 'recalled' ? '#d32f2f' : '#4caf50'
-                              }}></div>
-                            </div>
-                          </div>
-                        </>
-                      )}
-                      {!resultData && (
-                        <p className="text-on-surface-variant text-sm">Loading results...</p>
-                      )}
+                    {/* Confidence score display */}
+                    <div className="flex flex-col items-center py-4 border-b border-outline-variant/30">
+                      <div
+                        className="relative flex items-center justify-center w-28 h-28 rounded-full mb-3"
+                        style={{
+                          background: resultData
+                            ? (resultData.status === 'recalled'
+                                ? 'conic-gradient(#d32f2f 0% var(--fill), #EEE0CB var(--fill) 100%)'
+                                : 'conic-gradient(#FF8C00 0% var(--fill), #EEE0CB var(--fill) 100%)')
+                            : 'conic-gradient(#EEE0CB 0% 100%)',
+                          '--fill': showStats && resultData && resultData.confidence !== 'Invalid' && resultData.confidence !== '0%'
+                            ? resultData.confidence
+                            : '0%',
+                        }}
+                      >
+                        <div className="absolute inset-2 rounded-full bg-surface-container-lowest flex flex-col items-center justify-center">
+                          <span className="text-2xl font-bold text-on-surface leading-none">
+                            {resultData
+                              ? (resultData.confidence === 'Invalid' ? '—' : resultData.confidence)
+                              : '—'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-label-sm text-on-surface-variant uppercase tracking-widest text-xs text-center">
+                        Confidence Score
+                      </span>
                     </div>
+
+                    {/* Entity rows */}
+                    {resultData && resultData.extractedEntities ? (
+                      <div className="flex flex-col gap-4">
+                        {/* Brand */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="material-symbols-outlined text-primary text-base">branding_watermark</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-label-sm text-on-surface-variant uppercase tracking-wider text-[10px]">Brand</p>
+                            <p className="font-label-md text-on-surface text-sm font-semibold truncate">
+                              {resultData.extractedEntities.Brand === 'Unknown' ? 'Not identified' : resultData.extractedEntities.Brand}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Product Type */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="material-symbols-outlined text-primary text-base">category</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-label-sm text-on-surface-variant uppercase tracking-wider text-[10px]">Product Type</p>
+                            <p className="font-label-md text-on-surface text-sm font-semibold truncate">
+                              {resultData.extractedEntities.ProductType === 'Unknown' ? 'Not identified' : resultData.extractedEntities.ProductType}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Recall Status */}
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ backgroundColor: resultData.status === 'recalled' ? '#fdecea' : '#e8f5e9' }}
+                          >
+                            <span
+                              className="material-symbols-outlined text-base"
+                              style={{
+                                color: resultData.status === 'recalled' ? '#d32f2f' : '#2e7d32',
+                                fontVariationSettings: "'FILL' 1",
+                              }}
+                            >
+                              {resultData.status === 'recalled' ? 'cancel' : 'check_circle'}
+                            </span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-label-sm text-on-surface-variant uppercase tracking-wider text-[10px]">FDA Status</p>
+                            <p
+                              className="font-label-md text-sm font-semibold"
+                              style={{ color: resultData.status === 'recalled' ? '#d32f2f' : '#2e7d32' }}
+                            >
+                              {resultData.status === 'recalled' ? 'Recall Found' : 'No Active Recall'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-on-surface-variant text-sm text-center py-4">No data available.</p>
+                    )}
                   </div>
                 </div>
               </div>
