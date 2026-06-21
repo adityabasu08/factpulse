@@ -359,7 +359,7 @@ export default function EpicureanApp() {
                       <div className="flex items-center justify-center w-40 h-40 rounded-full border-4 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
                         <span className="text-4xl font-bold text-gray-400 dark:text-gray-500">0%</span>
                       </div>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Confidence Score</p>
+                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Evidence Strength</p>
                     </div>
 
                     {/* Agrees/Disagrees/Inconclusive */}
@@ -401,7 +401,7 @@ export default function EpicureanApp() {
                           {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Confidence Score</p>
+                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Evidence Strength</p>
                     </div>
 
                     {/* Agrees/Disagrees/Inconclusive */}

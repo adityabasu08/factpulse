@@ -53,28 +53,31 @@ async function callLLM(systemPrompt, userText) {
 
 // MODULE 1: ENTITY EXTRACTION
 async function extractEntities(rumorText) {
-  const systemPrompt = `You are a precise data extraction assistant specialized in food safety. Your task is to process informal, messy social media rumors and extract the commercial brand and the generic product type.
+  const systemPrompt = `You are a precise data extraction assistant specialized in food safety. Your task is to process informal, messy social media rumors and extract the commercial brand, the generic product type, AND the specific concern/hazard mentioned.
 
 CRITICAL RULES:
 1. Output ONLY a valid JSON string. Do not include any introduction, explanation, or concluding text.
 2. If the brand is unknown or not explicitly mentioned, set the "Brand" value to "Unknown".
-3. Use the following JSON schema:
+3. If the product type is unknown, set the "Product Type" to "Unknown".
+4. Extract the specific concern or hazard mentioned (e.g., "salmonella", "plastic", "metal", "allergen", "contamination", "e.coli"). If no specific concern is mentioned, set "Concern" to "Unknown".
+
+Use the following JSON schema:
 {
   "Brand": "Name of brand",
-  "Product Type": "Generic descriptor of the product"
-}
-
-If you cannot identify a product type, return {"Brand": "Unknown", "Product Type": "Unknown"}.`;
+  "Product Type": "Generic descriptor of the product",
+  "Concern": "The specific concern or hazard mentioned"
+}`;
 
   try {
     const raw = await callLLM(systemPrompt, rumorText);
     const parsed = JSON.parse(raw);
     return {
-      Brand: parsed.Brand || parsed['Product Type'] || 'Unknown',
-      ProductType: parsed['Product Type'] || parsed.ProductType || 'Unknown'
+      Brand: parsed.Brand || 'Unknown',
+      ProductType: parsed['Product Type'] || parsed.ProductType || 'Unknown',
+      Concern: parsed.Concern || 'Unknown'
     };
   } catch {
-    return { Brand: 'Unknown', ProductType: 'Unknown' };
+    return { Brand: 'Unknown', ProductType: 'Unknown', Concern: 'Unknown' };
   }
 }
 
@@ -277,6 +280,67 @@ function getSourceName(source) {
   return names[source] || source;
 }
 
+// =========================================
+// AI SOURCE ANALYSIS
+// =========================================
+async function analyzeSourceWithAI(sourceName, sourceData, userQuery, extractedEntities, queryIntent) {
+  // Limit data to top 3 results to reduce token usage
+  const limitedData = sourceData.slice(0, 3);
+
+  const systemPrompt = `You are a fact-checker. Analyze the source data and decide if it AGREES or DISAGREES with the user's claim.
+
+The user's query is about: ${queryIntent === 'SAFETY' ? 'whether the product is SAFE' : 'whether the product is RECALLED'}.
+
+**CRITICAL RULES:**
+- If the user asks "Is X SAFE?" and the source shows a recall → DISAGREE (it's not safe).
+- If the user asks "Is X RECALLED?" and the source shows a recall → AGREE (it is recalled).
+- If the source has no data → INCONCLUSIVE.
+- If the source has data but it doesn't match the product → INCONCLUSIVE.
+
+**EXAMPLES:**
+- User: "Is Jif peanut butter safe?" → FDA: recall found → DISAGREE
+- User: "Is Jif peanut butter recalled?" → FDA: recall found → AGREE
+- User: "Is bread safe?" → FDA: no data → INCONCLUSIVE
+
+Return: {"verdict": "AGREES"|"DISAGREES"|"INCONCLUSIVE", "reason": "..."}`;
+
+  const userPrompt = `
+User query: ${userQuery}
+Query intent: ${queryIntent}
+Product: ${extractedEntities.ProductType}
+Brand: ${extractedEntities.Brand}
+Concern: ${extractedEntities.Concern}
+
+Source: ${sourceName}
+Data: ${JSON.stringify(limitedData, null, 2)}`;
+
+  try {
+    const response = await callLLM(systemPrompt, userPrompt);
+    const parsed = JSON.parse(response);
+    return parsed;
+  } catch (error) {
+    console.error(`AI analysis failed for ${sourceName}:`, error.message);
+    return { verdict: 'INCONCLUSIVE', reason: 'Analysis failed' };
+  }
+}
+
+// =========================================
+// QUERY INTENT DETECTION
+// =========================================
+function detectQueryIntent(query) {
+  const lower = query.toLowerCase();
+  
+  const safetyKeywords = ['safe', 'safety', 'ok to eat', 'safe to eat', 'harmful', 'dangerous', 'healthy', 'good for you'];
+  const recallKeywords = ['recall', 'recalled', 'recalls', 'alert', 'warning', 'contamination', 'salmonella', 'e.coli', 'listeria', 'outbreak'];
+  
+  const isSafetyQuery = safetyKeywords.some(k => lower.includes(k));
+  const isRecallQuery = recallKeywords.some(k => lower.includes(k));
+  
+  // Default to recall if neither is clear
+  if (isSafetyQuery && !isRecallQuery) return 'SAFETY';
+  return 'RECALL';
+}
+
 // MODULE 2: EXPLAINER ROUTE
 async function generateExplanation(compactResults, rumorText) {
   // If no results, return fallback
@@ -309,41 +373,6 @@ CRITICAL RULES:
   return await callLLM(systemPrompt, userPrompt);
 }
 
-// MODULE 3: CONFIDENCE BREAKDOWN ENGINE (No LLM)
-function calculateConfidenceBreakdown(sourceStatus) {
-  const totalSources = Object.keys(sourceStatus).length;
-  let agrees = 0;
-  let disagrees = 0;
-  let inconclusive = 0;
-
-  Object.values(sourceStatus).forEach(status => {
-    if (status === true) {
-      agrees++;
-    } else {
-      // For now, treat all non-matches as inconclusive
-      // (We could add explicit "disagrees" logic later if sources return safe/clear data)
-      inconclusive++;
-    }
-  });
-
-  // Calculate percentages
-  const agreePercent = totalSources > 0 ? Math.round((agrees / totalSources) * 100) : 0;
-  const disagreePercent = totalSources > 0 ? Math.round((disagrees / totalSources) * 100) : 0;
-  const inconclusivePercent = totalSources > 0 ? Math.round((inconclusive / totalSources) * 100) : 0;
-
-  // Confidence = (Total - Disagrees) / Total × 100%
-  const confidence = totalSources > 0 
-    ? Math.round(((totalSources - disagrees) / totalSources) * 100) 
-    : 0;
-
-  return {
-    agrees: agreePercent,
-    disagrees: disagreePercent,
-    inconclusive: inconclusivePercent,
-    confidence: confidence
-  };
-}
-
 // MAIN API ROUTE
 export async function POST(request) {
   try {
@@ -357,7 +386,8 @@ export async function POST(request) {
     }
 
     // Step 1: Extract entities
-    const { Brand, ProductType } = await extractEntities(rumorText);
+    const { Brand, ProductType, Concern } = await extractEntities(rumorText);
+    console.log(`🔍 Extracted: Brand="${Brand}", Product="${ProductType}", Concern="${Concern}"`);
 
     // Step 1b: Check if this is gibberish or unrelated to food
     const foodKeywords = ['food', 'product', 'recall', 'safe', 'eat', 'drink', 'allergy', 'contamination', 'salmonella', 'e.coli', 'listeria', 'peanut', 'milk', 'egg', 'soy', 'wheat', 'fish', 'shellfish', 'meat', 'poultry', 'dairy', 'bread', 'cereal', 'snack', 'drink', 'beverage', 'fruit', 'vegetable', 'chicken', 'beef', 'pork', 'jif', 'tyson', 'goldfish', 'peanut butter'];
@@ -378,7 +408,7 @@ export async function POST(request) {
         sourceStatus: {},
         totalSourcesChecked: 0,
         sourcesWithMatches: 0,
-        extractedEntities: { Brand, ProductType }
+        extractedEntities: { Brand, ProductType, Concern }
       });
     }
 
@@ -394,7 +424,7 @@ export async function POST(request) {
         sourceStatus: {},
         totalSourcesChecked: 0,
         sourcesWithMatches: 0,
-        extractedEntities: { Brand, ProductType }
+        extractedEntities: { Brand, ProductType, Concern }
       });
     }
 
@@ -459,17 +489,13 @@ export async function POST(request) {
       }
     }
 
-    // Log the final result
-    console.log('🔍 FDA Final - Found', fdaResults.length, 'results');
-    if (fdaResults.length > 0) {
-      console.log('📄 First result product_description:', fdaResults[0].product_description);
-    }
+    console.log(`📊 FDA Results: ${fdaResults.length}`);
 
     // --- Step 2b: Check if this is a health risk query (WHO) ---
     const isHealthQuery = await queryWHO(rumorText);
 
-    // --- Step 3: Query ALL 8 sources in parallel ---
-    const [
+    // --- Step 3: Query ALL sources in parallel ---
+    let [
       usdaResults,
       ukResults,
       cfiaResults,
@@ -485,7 +511,109 @@ export async function POST(request) {
       queryCDC(Brand)
     ]);
 
-    // --- Step 4: Merge all results ---
+    // --- Step 4: Collect sources with data for AI analysis (reduces token usage) ---
+    const extractedEntities = { Brand, ProductType, Concern };
+    const whoResults = isHealthQuery ? [{ health_alert: true }] : [];
+
+    const sourcesWithData = [];
+
+    if (fdaResults.length > 0) sourcesWithData.push({ name: 'FDA', data: fdaResults });
+    if (usdaResults.length > 0) sourcesWithData.push({ name: 'USDA', data: usdaResults });
+    if (ukResults.length > 0) sourcesWithData.push({ name: 'UK FSA', data: ukResults });
+    if (cfiaResults.length > 0) sourcesWithData.push({ name: 'CFIA', data: cfiaResults });
+    if (whoResults.length > 0) sourcesWithData.push({ name: 'WHO', data: whoResults });
+    if (openFoodFactsResults.length > 0) sourcesWithData.push({ name: 'Open Food Facts', data: openFoodFactsResults });
+    if (rasffResults.length > 0) sourcesWithData.push({ name: 'RASFF', data: rasffResults });
+    if (cdcResults.length > 0) sourcesWithData.push({ name: 'CDC', data: cdcResults });
+
+    // Detect query intent before analysis (used by AI reasoning)
+    const queryIntent = detectQueryIntent(rumorText);
+
+    // Only analyze sources with data
+    const analysisPromises = sourcesWithData.map(s =>
+      analyzeSourceWithAI(s.name, s.data, rumorText, extractedEntities, queryIntent)
+    );
+
+    const analyses = await Promise.all(analysisPromises);
+
+    // Sources without data are automatically inconclusive
+    const sourcesWithoutData = 8 - sourcesWithData.length;
+
+    // Count verdicts (AI already handles intent reasoning)
+    let agrees = 0, disagrees = 0, inconclusive = 0;
+
+    analyses.forEach(a => {
+      if (a.verdict === 'AGREES') agrees++;
+      else if (a.verdict === 'DISAGREES') disagrees++;
+      else inconclusive++;
+    });
+
+    // Add sources without data as inconclusive
+    inconclusive += sourcesWithoutData;
+
+    // Fallback: For SAFETY queries, if a source has data, treat as DISAGREE
+    if (queryIntent === 'SAFETY') {
+      analyses.forEach((a, i) => {
+        if (i < sourcesWithData.length && sourcesWithData[i].data.length > 0 && a.verdict === 'INCONCLUSIVE') {
+          a.verdict = 'DISAGREES';
+          a.reason = 'Recall data found (fallback)';
+        }
+      });
+    }
+
+    // Recalculate counts after fallback
+    agrees = 0; disagrees = 0; inconclusive = 0;
+    analyses.forEach(a => {
+      if (a.verdict === 'AGREES') agrees++;
+      else if (a.verdict === 'DISAGREES') disagrees++;
+      else inconclusive++;
+    });
+    inconclusive += sourcesWithoutData;
+
+    // Evidence Strength = Sources with Data / Total Sources
+    const sourcesWithDataCount = sourcesWithData.length;
+    const evidenceStrength = Math.round((sourcesWithDataCount / 8) * 100);
+
+    // Calculate percentages based on total sources (8)
+    const totalSources = 8;
+    const agreePercent = Math.round((agrees / totalSources) * 100);
+    const disagreePercent = Math.round((disagrees / totalSources) * 100);
+    const inconclusivePercent = Math.round((inconclusive / totalSources) * 100);
+
+    console.log(`🧠 AI Analysis: ${agrees} agrees, ${disagrees} disagrees, ${inconclusive} inconclusive → Evidence Strength: ${evidenceStrength}% (Intent: ${queryIntent})`);
+
+    // Build sourceStatus from analyzed sources + default false for unanalyzed
+    const sourceStatus = {
+      fda: false,
+      usda: false,
+      ukfsa: false,
+      cfia: false,
+      who: false,
+      openfoodfacts: false,
+      rasff: false,
+      cdc: false
+    };
+
+    // Map analyzed source names back to keys
+    const nameToKey = {
+      'FDA': 'fda',
+      'USDA': 'usda',
+      'UK FSA': 'ukfsa',
+      'CFIA': 'cfia',
+      'WHO': 'who',
+      'Open Food Facts': 'openfoodfacts',
+      'RASFF': 'rasff',
+      'CDC': 'cdc'
+    };
+
+    sourcesWithData.forEach((s, i) => {
+      const key = nameToKey[s.name];
+      if (key && analyses[i]) {
+        sourceStatus[key] = analyses[i].verdict === 'AGREES';
+      }
+    });
+
+    // --- Step 5: Merge all results ---
     const allResults = mergeResults([
       fdaResults,
       usdaResults,
@@ -496,22 +624,7 @@ export async function POST(request) {
       cdcResults
     ]);
 
-    // --- Step 5: Determine which sources found results ---
-    const sourceStatus = {
-      fda: fdaResults.length > 0,
-      usda: usdaResults.length > 0,
-      ukfsa: ukResults.length > 0,
-      cfia: cfiaResults.length > 0,
-      who: isHealthQuery,
-      openfoodfacts: openFoodFactsResults.length > 0,
-      rasff: rasffResults.length > 0,
-      cdc: cdcResults.length > 0
-    };
-
-    // --- Step 6: Calculate confidence breakdown ---
-    const confidenceBreakdown = calculateConfidenceBreakdown(sourceStatus);
-
-    // --- Step 7: Generate explanation ---
+    // --- Step 6: Generate explanation ---
     let explanation;
     let fact;
 
@@ -535,7 +648,7 @@ export async function POST(request) {
       explanation = 'No active official recall has been recorded for this product in any of our verified databases.';
     }
 
-    // --- Step 8: Generate source links ---
+    // --- Step 7: Generate source links ---
     const sourceLinks = [];
     if (fdaResults.length > 0 && fdaResults[0].url) sourceLinks.push(fdaResults[0].url);
     if (usdaResults.length > 0 && usdaResults[0].url) sourceLinks.push(usdaResults[0].url);
@@ -543,23 +656,23 @@ export async function POST(request) {
     if (cfiaResults.length > 0 && cfiaResults[0].url) sourceLinks.push(cfiaResults[0].url);
     if (rasffResults.length > 0 && rasffResults[0].url) sourceLinks.push(rasffResults[0].url);
 
-    // --- Step 9: Return response ---
-    const totalSources = 8;
+    // --- Step 8: Return response ---
     const sourcesWithMatches = Object.values(sourceStatus).filter(v => v).length;
 
     return NextResponse.json({
       status: allResults.length > 0 ? 'recalled' : 'safe',
       fact: fact,
       summary: explanation,
-      confidence: confidenceBreakdown.confidence,
-      agrees: confidenceBreakdown.agrees,
-      disagrees: confidenceBreakdown.disagrees,
-      inconclusive: confidenceBreakdown.inconclusive,
+      confidence: evidenceStrength,
+      agrees: agreePercent,
+      disagrees: disagreePercent,
+      inconclusive: inconclusivePercent,
       sourceStatus: sourceStatus,
+      sourceAnalysis: analyses,
       sourceLinks: sourceLinks.length > 0 ? sourceLinks : null,
       totalSourcesChecked: totalSources,
       sourcesWithMatches: sourcesWithMatches,
-      extractedEntities: { Brand, ProductType }
+      extractedEntities: { Brand, ProductType, Concern }
     });
   } catch (error) {
     console.error('API Error:', error);
