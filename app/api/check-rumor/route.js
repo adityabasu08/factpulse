@@ -2,34 +2,22 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-// Force load .env.local for development
-import dotenv from 'dotenv';
-import { resolve } from 'path';
-
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: resolve(process.cwd(), '.env.local') });
-}
-
-// Initialize Groq client with explicit error checking
-const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
-
-console.log('🔑 Environment check:');
-console.log('  - GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Found' : '❌ Not found');
-console.log('  - OPENFDA_API_KEY:', process.env.OPENFDA_API_KEY ? '✅ Found' : '❌ Not found');
-
-if (!apiKey) {
-  throw new Error('Missing Groq API key. Please set GROQ_API_KEY in .env.local');
-}
-
-const groq = new OpenAI({
-  baseURL: 'https://api.groq.com/openai/v1',
-  apiKey: apiKey,
-});
-
 const MODEL = 'llama-3.3-70b-versatile';
+
+function getGroqClient() {
+  const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing Groq API key. Please set GROQ_API_KEY in your environment.');
+  }
+  return new OpenAI({
+    baseURL: 'https://api.groq.com/openai/v1',
+    apiKey,
+  });
+}
 
 // Helper to call Groq with a system prompt and user input
 async function callLLM(systemPrompt, userText) {
+  const groq = getGroqClient();
   const response = await groq.chat.completions.create({
     model: MODEL,
     messages: [
