@@ -159,7 +159,7 @@ factpulse/
 
 ## 🏆 Hackathon Project
 
-Built for [Hackathon Name] — [Date]
+Built for [USAII HACKATHON] — [2026]
 
 **Team:**
 - Aditya Basu
