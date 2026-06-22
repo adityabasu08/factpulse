@@ -162,9 +162,6 @@ export default function EpicureanApp() {
                   <h1 className="font-headline-xl text-headline-xl md:text-[64px] text-on-surface leading-tight tracking-tight">
                     Uncover the <span className="text-primary italic">Truth</span> in Every Bite.
                   </h1>
-                  <p className="font-body-lg text-body-lg text-on-surface-variant max-w-2xl mx-auto">
-                    A scientific lens for your plate. We analyze 1,000+ clinical sources to provide instant, evidence-based ingredient clarity.
-                  </p>
                   <div className="mt-xl glass-card p-2 md:p-3 rounded-2xl food-shadow max-w-2xl mx-auto flex flex-col md:flex-row gap-2 transition-all duration-500 ease-out">
                     <div className="relative flex-grow flex items-center px-4">
                       <span className="material-symbols-outlined text-outline mr-3">search</span>
@@ -349,100 +346,92 @@ export default function EpicureanApp() {
                 </h2>
               </section>
 
-              {/* Invalid Response — Minimal Flat Design */}
+              {/* Invalid Response */}
               {resultData && (resultData.status === 'invalid' || resultData.status === 'inappropriate') && (
-                <div className="flex items-center justify-center w-full px-4">
-                  <div className="w-full max-w-md p-8 backdrop-blur-xl rounded-2xl border border-outline-variant/30">
-
-                    {/* Confidence Score — Large Circular Badge */}
-                    <div className="flex flex-col items-center justify-center w-full">
-                      <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
-                        <div className="text-center">
-                          <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">0%</span>
-                          <p className="text-xs text-on-surface-variant mt-1 tracking-wide">Confidence Score</p>
-                        </div>
+                <div className="flex flex-col items-center justify-center w-full">
+                  {/* Confidence Score — Large Circular Badge */}
+                  <div className="flex flex-col items-center justify-center w-full">
+                    <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800">
+                      <div className="text-center">
+                        <span className="text-5xl font-bold text-gray-400 dark:text-gray-500">0%</span>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 tracking-wide">Confidence Score</p>
                       </div>
                     </div>
+                  </div>
 
-                    {/* Spacer */}
-                    <div className="mt-10"></div>
+                  {/* Spacer */}
+                  <div className="mt-10"></div>
 
-                    {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
-                    <div className="flex justify-center gap-10">
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-green-500 dark:text-green-400">0%</span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Agrees</span>
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-red-500 dark:text-red-400">0%</span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Disagrees</span>
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">100%</span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Inconclusive</span>
-                      </div>
+                  {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
+                  <div className="flex justify-center gap-10">
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-green-500 dark:text-green-400">0%</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Agrees</span>
                     </div>
-
-                    {/* Source Count */}
-                    <div className="text-center mt-8">
-                      <p className="text-sm text-on-surface-variant whitespace-nowrap">
-                        0 out of 8 sources agree
-                      </p>
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-red-500 dark:text-red-400">0%</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Disagrees</span>
                     </div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">100%</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Inconclusive</span>
+                    </div>
+                  </div>
 
+                  {/* Source Count */}
+                  <div className="text-center mt-8">
+                    <p className="text-sm text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                      0 out of 8 sources agree
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* Results Section — Minimal Flat Design */}
+              {/* Results Section */}
               {resultData && resultData.status !== 'invalid' && resultData.status !== 'inappropriate' && (
-                <div className="flex items-center justify-center w-full px-4">
-                  <div className="w-full max-w-md p-8 backdrop-blur-xl rounded-2xl border border-outline-variant/30">
-
-                    {/* Confidence Score — Large Circular Badge */}
-                    <div className="flex flex-col items-center justify-center w-full">
-                      <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
-                        <div className="text-center">
-                          <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">
-                            {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
-                          </span>
-                          <p className="text-xs text-on-surface-variant mt-1 tracking-wide">Confidence Score</p>
-                        </div>
+                <div className="flex flex-col items-center justify-center w-full">
+                  {/* Confidence Score — Large Circular Badge */}
+                  <div className="flex flex-col items-center justify-center w-full">
+                    <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20">
+                      <div className="text-center">
+                        <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">
+                          {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
+                        </span>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 tracking-wide">Confidence Score</p>
                       </div>
                     </div>
+                  </div>
 
-                    {/* Spacer */}
-                    <div className="mt-10"></div>
+                  {/* Spacer */}
+                  <div className="mt-10"></div>
 
-                    {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
-                    <div className="flex justify-center gap-10">
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-green-500 dark:text-green-400">
-                          {resultData.agrees !== undefined ? `${resultData.agrees}%` : '0%'}
-                        </span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Agrees</span>
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-red-500 dark:text-red-400">
-                          {resultData.disagrees !== undefined ? `${resultData.disagrees}%` : '0%'}
-                        </span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Disagrees</span>
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">
-                          {resultData.inconclusive !== undefined ? `${resultData.inconclusive}%` : '0%'}
-                        </span>
-                        <span className="text-xs text-on-surface-variant mt-0.5">Inconclusive</span>
-                      </div>
+                  {/* Agrees/Disagrees/Inconclusive — Plain Text Row */}
+                  <div className="flex justify-center gap-10">
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-green-500 dark:text-green-400">
+                        {resultData.agrees !== undefined ? `${resultData.agrees}%` : '0%'}
+                      </span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Agrees</span>
                     </div>
-
-                    {/* Source Count */}
-                    <div className="text-center mt-8">
-                      <p className="text-sm text-on-surface-variant whitespace-nowrap">
-                        {resultData.sourcesWithMatches || 0} out of {resultData.totalSourcesChecked || 8} sources agree
-                      </p>
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-red-500 dark:text-red-400">
+                        {resultData.disagrees !== undefined ? `${resultData.disagrees}%` : '0%'}
+                      </span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Disagrees</span>
                     </div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">
+                        {resultData.inconclusive !== undefined ? `${resultData.inconclusive}%` : '0%'}
+                      </span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Inconclusive</span>
+                    </div>
+                  </div>
 
+                  {/* Source Count */}
+                  <div className="text-center mt-8">
+                    <p className="text-sm text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                      {resultData.sourcesWithMatches || 0} out of {resultData.totalSourcesChecked || 8} sources agree
+                    </p>
                   </div>
                 </div>
               )}
