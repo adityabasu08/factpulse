@@ -48,20 +48,55 @@ async function callLLM(systemPrompt, userText) {
 
 // MODULE 1: ENTITY EXTRACTION
 async function extractEntities(rumorText) {
-  const systemPrompt = `You are a precise data extraction assistant specialized in food safety. Your task is to process informal, messy social media rumors and extract the commercial brand, the generic product type, AND the specific concern/hazard mentioned.
+  const systemPrompt = `You are a precise data extraction assistant. You must extract Brand, Product Type, and Concern from ANY user query — even if it is:
 
-CRITICAL RULES:
-1. Output ONLY a valid JSON string. Do not include any introduction, explanation, or concluding text.
-2. If the brand is unknown or not explicitly mentioned, set the "Brand" value to "Unknown".
-3. If the product type is unknown, set the "Product Type" to "Unknown".
-4. Extract the specific concern or hazard mentioned (e.g., "salmonella", "plastic", "metal", "allergen", "contamination", "e.coli"). If no specific concern is mentioned, set "Concern" to "Unknown".
+- **No spaces**: "isCaitoFoodsService.Increcalledforsalmonella"
+- **CamelCase**: "doesJifPeanutButterCauseCancer"
+- **Missing punctuation**: "istysonchickensafe"
+- **Mixed formatting**: "isKeurigDrPeppercontainssugar?"
 
-Use the following JSON schema:
-{
-  "Brand": "Name of brand",
-  "Product Type": "Generic descriptor of the product",
-  "Concern": "The specific concern or hazard mentioned"
-}`;
+**Your task:** Parse the query by recognizing patterns:
+
+- **Brand**: Look for capitalized words, company suffixes (Inc, LLC, Corp, Foods, Service, Group, Brands, Company, etc.), and recognizable brand names (Jif, Tyson, Keurig, Caito, etc.).
+- **Product Type**: Look for common food/product terms (peanut butter, chicken, bread, ice cream, cereal, etc.).
+- **Concern**: Look for safety/health terms (salmonella, recall, contamination, plastic, sugar, cancer, E. coli, listeria, allergen, etc.).
+
+**CRITICAL RULES:**
+1. Even if the query has NO spaces, you can split it by recognizing capitalized letters, suffixes, and known terms.
+2. If multiple brands or products are possible, choose the most plausible one.
+3. If a field is not present, set it to "Unknown".
+4. Output ONLY a valid JSON object with keys: "Brand", "Product Type", "Concern".
+
+**EXAMPLES:**
+
+Input: "isCaitoFoodsService.Increcalledforsalmonella"
+→ {"Brand": "Caito Foods Service, Inc.", "Product Type": "Unknown", "Concern": "salmonella"}
+
+Input: "doesJifpeanutbuttercausecancer"
+→ {"Brand": "Jif", "Product Type": "peanut butter", "Concern": "cancer"}
+
+Input: "isTysonchickensafe"
+→ {"Brand": "Tyson", "Product Type": "chicken", "Concern": "safe"}
+
+Input: "isKeurigDrPeppercontainssugar"
+→ {"Brand": "Keurig Dr Pepper", "Product Type": "Unknown", "Concern": "sugar"}
+
+Input: "issmithfieldbaconrecalled"
+→ {"Brand": "Smithfield", "Product Type": "bacon", "Concern": "recalled"}
+
+Input: "recallonperdueturkry"
+→ {"Brand": "Perdue", "Product Type": "turkey", "Concern": "recall"}
+
+Input: "isbreadsafe"
+→ {"Brand": "Unknown", "Product Type": "bread", "Concern": "safe"}
+
+Input: "doesbreadhaveplastic"
+→ {"Brand": "Unknown", "Product Type": "bread", "Concern": "plastic"}
+
+Input: "is there a recall for Jif peanut butter"
+→ {"Brand": "Jif", "Product Type": "peanut butter", "Concern": "recall"}
+
+Now, extract from the following user input:`;
 
   try {
     const raw = await callLLM(systemPrompt, rumorText);
@@ -71,9 +106,40 @@ Use the following JSON schema:
       ProductType: parsed['Product Type'] || parsed.ProductType || 'Unknown',
       Concern: parsed.Concern || 'Unknown'
     };
-  } catch {
-    return { Brand: 'Unknown', ProductType: 'Unknown', Concern: 'Unknown' };
+  } catch (error) {
+    console.error('❌ Entity extraction failed:', error.message);
+    // Fallback: use simple pattern matching
+    return fallbackExtract(rumorText);
   }
+}
+
+function fallbackExtract(query) {
+  // Find potential brand: words that start with uppercase or known suffixes
+  const brandMatch = query.match(/([A-Z][a-z]+(?:,?\s*(?:Inc|LLC|Ltd|Corp|Company|Foods|Service|Group|Brands?|Products?))?)/);
+  // Find potential product type: common food terms
+  const productTypes = ['peanut butter', 'chicken', 'bread', 'ice cream', 'turkey', 'bacon', 'cereal', 'milk', 'cheese', 'yogurt', 'beef', 'pork', 'salmon', 'tuna', 'egg', 'flour', 'sugar', 'salt'];
+  let productMatch = null;
+  for (const term of productTypes) {
+    if (query.toLowerCase().includes(term)) {
+      productMatch = term;
+      break;
+    }
+  }
+  // Find concern: common safety terms
+  const concernTerms = ['salmonella', 'e.coli', 'listeria', 'recall', 'contamination', 'allergen', 'plastic', 'cancer', 'sugar', 'gluten', 'dairy'];
+  let concernMatch = null;
+  for (const term of concernTerms) {
+    if (query.toLowerCase().includes(term)) {
+      concernMatch = term;
+      break;
+    }
+  }
+
+  return {
+    Brand: brandMatch ? brandMatch[1].trim() : 'Unknown',
+    ProductType: productMatch || 'Unknown',
+    Concern: concernMatch || 'Unknown'
+  };
 }
 
 // =========================================
@@ -86,15 +152,150 @@ function isInappropriateQuery(text) {
 }
 
 // =========================================
+// HELPER: Filter results by concern
+// =========================================
+function filterResultsByConcern(results, Concern) {
+  if (!Concern || Concern === 'Unknown' || Concern === 'safe' || Concern === 'safety') {
+    return results;
+  }
+  const concernLower = Concern.toLowerCase();
+  return results.filter(r => {
+    const reason = (r.reason_for_recall || r.reason || r.hazard || '').toLowerCase();
+    const description = (r.product_description || '').toLowerCase();
+    return reason.includes(concernLower) || description.includes(concernLower);
+  });
+}
+
+// =========================================
+// SOURCE 1: FDA (Multi-strategy search)
+// =========================================
+async function queryFDA(Brand, ProductType, Concern) {
+  try {
+    if ((Brand === 'Unknown' || Brand === '') && (ProductType === 'Unknown' || ProductType === '')) {
+      return [];
+    }
+
+    let allResults = [];
+    const searchStrategies = [];
+
+    // Build search strategies
+    if (Brand !== 'Unknown' && Brand !== '') {
+      // Strategy 1: Exact brand_name match
+      searchStrategies.push({
+        url: `https://api.fda.gov/food/enforcement.json?search=brand_name:"${encodeURIComponent(Brand)}"&limit=10`,
+        name: 'brand_name_exact'
+      });
+      
+      // Strategy 2: Partial brand_name match
+      const brandParts = Brand.split(/[\s,]+/).filter(p => p.length > 2);
+      if (brandParts.length > 1) {
+        const partialBrand = brandParts.slice(0, 2).join(' ');
+        searchStrategies.push({
+          url: `https://api.fda.gov/food/enforcement.json?search=brand_name:"${encodeURIComponent(partialBrand)}"&limit=10`,
+          name: 'brand_name_partial'
+        });
+      }
+      
+      // Strategy 3: product_description contains brand
+      searchStrategies.push({
+        url: `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(Brand)}"&limit=10`,
+        name: 'product_description_exact'
+      });
+    }
+
+    if (ProductType !== 'Unknown' && ProductType !== '') {
+      // Strategy 4: product_description contains product type
+      searchStrategies.push({
+        url: `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(ProductType)}"&limit=10`,
+        name: 'product_type'
+      });
+    }
+
+    // If no strategies, return empty
+    if (searchStrategies.length === 0) {
+      return [];
+    }
+
+    // Try each strategy until we find results
+    for (const strategy of searchStrategies) {
+      try {
+        const response = await fetch(strategy.url, {
+          headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.results && data.results.length > 0) {
+            console.log(`📊 FDA: ${data.results.length} results found using "${strategy.name}"`);
+            
+            // Filter by Concern if applicable
+            let filteredResults = data.results;
+            if (Concern && Concern !== 'Unknown' && Concern !== 'safe' && Concern !== 'safety') {
+              filteredResults = filterResultsByConcern(data.results, Concern);
+              console.log(`📊 FDA: ${filteredResults.length} results after concern filtering`);
+            }
+            
+            // Merge results
+            allResults = [...allResults, ...filteredResults];
+            
+            // If we have at least 1 result after concern filtering, break
+            if (filteredResults.length > 0) {
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`FDA ${strategy.name} error:`, error.message);
+      }
+    }
+
+    // Deduplicate results
+    const uniqueResults = [];
+    const seen = new Set();
+    allResults.forEach(item => {
+      const id = item.recall_number || item.id || JSON.stringify(item);
+      if (!seen.has(id)) {
+        seen.add(id);
+        uniqueResults.push(item);
+      }
+    });
+
+    console.log(`📊 FDA Final: ${uniqueResults.length} unique results`);
+    return uniqueResults;
+    
+  } catch (error) {
+    console.error('FDA API Error:', error.message);
+    return [];
+  }
+}
+
+// =========================================
 // SOURCE 2: USDA FSIS (Meat, Poultry, Eggs)
 // =========================================
-async function queryUSDA(brand) {
+async function queryUSDA(Brand, Concern) {
   try {
-    const url = `https://www.fsis.usda.gov/api/recalls?query=${encodeURIComponent(brand)}`;
-    const response = await fetch(url);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.recalls || [];
+    if (Brand === 'Unknown' || Brand === '') return [];
+    
+    // Try multiple variations
+    const brandParts = Brand.split(/[\s,]+/).filter(p => p.length > 2);
+    const searchQueries = [
+      Brand,
+      brandParts.slice(0, 2).join(' '),
+      brandParts[0]
+    ].filter(q => q && q.length > 2);
+    
+    for (const query of searchQueries) {
+      const url = `https://www.fsis.usda.gov/api/recalls?query=${encodeURIComponent(query)}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.recalls && data.recalls.length > 0) {
+          console.log(`📊 USDA: ${data.recalls.length} results found for "${query}"`);
+          return filterResultsByConcern(data.recalls, Concern);
+        }
+      }
+    }
+    return [];
   } catch (error) {
     console.error('USDA API Error:', error.message);
     return [];
@@ -104,13 +305,29 @@ async function queryUSDA(brand) {
 // =========================================
 // SOURCE 3: UK FSA (Food Alerts & Allergens)
 // =========================================
-async function queryUKFSA(brand) {
+async function queryUKFSA(Brand, Concern) {
   try {
-    const url = `https://api.food.gov.uk/alerts?query=${encodeURIComponent(brand)}`;
-    const response = await fetch(url);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.alerts || [];
+    if (Brand === 'Unknown' || Brand === '') return [];
+    
+    const brandParts = Brand.split(/[\s,]+/).filter(p => p.length > 2);
+    const searchQueries = [
+      Brand,
+      brandParts.slice(0, 2).join(' '),
+      brandParts[0]
+    ].filter(q => q && q.length > 2);
+    
+    for (const query of searchQueries) {
+      const url = `https://api.food.gov.uk/alerts?query=${encodeURIComponent(query)}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.alerts && data.alerts.length > 0) {
+          console.log(`📊 UK FSA: ${data.alerts.length} results found for "${query}"`);
+          return filterResultsByConcern(data.alerts, Concern);
+        }
+      }
+    }
+    return [];
   } catch (error) {
     console.error('UK FSA API Error:', error.message);
     return [];
@@ -120,20 +337,27 @@ async function queryUKFSA(brand) {
 // =========================================
 // SOURCE 4: CFIA (Canadian Food Recalls)
 // =========================================
-async function queryCFIA(brand) {
+async function queryCFIA(Brand, Concern) {
   try {
     const url = 'https://www.inspection.gc.ca/food-recalls-and-allergy-alerts/json/';
     const response = await fetch(url);
     if (!response.ok) return [];
     const data = await response.json();
     const recalls = data.recalls || [];
-    if (brand && brand !== 'Unknown') {
-      return recalls.filter(item =>
-        (item.product_name || '').toLowerCase().includes(brand.toLowerCase()) ||
-        (item.brand_name || '').toLowerCase().includes(brand.toLowerCase())
+    
+    let filtered = recalls;
+    if (Brand && Brand !== 'Unknown' && Brand !== '') {
+      filtered = recalls.filter(item =>
+        (item.product_name || '').toLowerCase().includes(Brand.toLowerCase()) ||
+        (item.brand_name || '').toLowerCase().includes(Brand.toLowerCase())
       );
     }
-    return recalls;
+    
+    // Filter by concern
+    filtered = filterResultsByConcern(filtered, Concern);
+    
+    console.log(`📊 CFIA: ${filtered.length} results found`);
+    return filtered;
   } catch (error) {
     console.error('CFIA API Error:', error.message);
     return [];
@@ -276,6 +500,56 @@ function getSourceName(source) {
 }
 
 // =========================================
+// HELPER: Verdict Mapping
+// =========================================
+function mapVerdictToAgreeDisagree(aiVerdict, queryIntent) {
+  if (aiVerdict === 'INCONCLUSIVE') return 'INCONCLUSIVE';
+
+  if (queryIntent === 'SAFETY') {
+    if (aiVerdict === 'AGREES') return 'DISAGREES';
+    if (aiVerdict === 'DISAGREES') return 'AGREES';
+  }
+
+  // INGREDIENT queries map directly
+  // "Does X contain Y?" → If source says "yes" → AGREES
+  return aiVerdict;
+}
+
+// =========================================
+// QUERY NORMALIZATION
+// =========================================
+function normalizeQuery(query) {
+  // Step 1: Remove extra spaces and trim
+  let cleaned = query.trim();
+
+  // Step 2: Add spaces between camelCase words
+  // "isCaitoFoodsService" → "is Caito Foods Service"
+  cleaned = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+  // Step 3: Add spaces after punctuation
+  // "Inc.recalled" → "Inc. recalled"
+  cleaned = cleaned.replace(/\.([a-zA-Z])/g, '. $1');
+  cleaned = cleaned.replace(/,([a-zA-Z])/g, ', $1');
+
+  // Step 4: Add spaces before common keywords
+  const keywords = ['recalled', 'recall', 'safe', 'safety', 'salmonella', 'e.coli', 'listeria', 'contamination'];
+  keywords.forEach(keyword => {
+    const regex = new RegExp(`(${keyword})([a-zA-Z])`, 'gi');
+    cleaned = cleaned.replace(regex, '$1 $2');
+  });
+
+  // Step 5: Add spaces after common prefixes
+  const prefixes = ['is', 'does', 'has', 'was', 'can', 'will', 'have'];
+  prefixes.forEach(prefix => {
+    const regex = new RegExp(`^(${prefix})([A-Z])`, 'i');
+    cleaned = cleaned.replace(regex, '$1 $2');
+  });
+
+  console.log(`🔧 Normalized query: "${query}" → "${cleaned}"`);
+  return cleaned;
+}
+
+// =========================================
 // AI SOURCE ANALYSIS
 // =========================================
 async function analyzeSourceWithAI(sourceName, sourceData, userQuery, extractedEntities, queryIntent) {
@@ -284,15 +558,26 @@ async function analyzeSourceWithAI(sourceName, sourceData, userQuery, extractedE
 
   const systemPrompt = `You are a fact-checker. Analyze the source data and decide if it AGREES or DISAGREES with the user's claim.
 
-The user's query is about: ${queryIntent === 'SAFETY' ? 'whether the product is SAFE' : 'whether the product is RECALLED'}.
+**Query Types:**
+- RECALL: "Is X recalled?" → Check if a recall exists
+- SAFETY: "Is X safe?" → Check if a recall exists (recall = not safe)
+- HEALTH: "Does X cause cancer/disease?" → Check if the source mentions the health risk
+- INGREDIENT: "Does X contain Y?" → Check if the source mentions the ingredient/substance
 
-**CRITICAL RULES:**
-- If the user asks "Is X SAFE?" and the source shows a recall → DISAGREE (it's not safe).
-- If the user asks "Is X RECALLED?" and the source shows a recall → AGREE (it is recalled).
-- If the source has no data → INCONCLUSIVE.
-- If the source has data but it doesn't match the product → INCONCLUSIVE.
+**INGREDIENT QUERIES (e.g., "Does X contain sugar?"):**
+- AGREES: The source confirms the product contains the ingredient (e.g., recall says "actually contains sugar")
+- DISAGREES: The source says the product does NOT contain the ingredient
+- INCONCLUSIVE: The source has no mention of the ingredient
 
 **EXAMPLES:**
+- Claim: "Does Keurig Dr Pepper contain sugar?" 
+  → FDA recall: "Zero Sugar products may contain sugar" 
+  → AGREES (contains sugar)
+
+- Claim: "Does product contain gluten?"
+  → FDA data: no mention of gluten
+  → INCONCLUSIVE
+
 - User: "Is Jif peanut butter safe?" → FDA: recall found → DISAGREE
 - User: "Is Jif peanut butter recalled?" → FDA: recall found → AGREE
 - User: "Is bread safe?" → FDA: no data → INCONCLUSIVE
@@ -324,14 +609,19 @@ Data: ${JSON.stringify(limitedData, null, 2)}`;
 // =========================================
 function detectQueryIntent(query) {
   const lower = query.toLowerCase();
-  
-  const safetyKeywords = ['safe', 'safety', 'ok to eat', 'safe to eat', 'harmful', 'dangerous', 'healthy', 'good for you'];
+
+  const ingredientKeywords = ['contain', 'contains', 'has', 'have', 'ingredient', 'sugar', 'gluten', 'dairy', 'soy', 'wheat', 'egg', 'peanut', 'tree nut', 'fish', 'shellfish'];
+  const healthKeywords = ['cancer', 'carcinogen', 'diabetes', 'heart disease', 'obesity', 'cause', 'risk', 'disease'];
+  const safetyKeywords = ['safe', 'safety', 'ok to eat', 'safe to eat', 'harmful', 'dangerous', 'healthy'];
   const recallKeywords = ['recall', 'recalled', 'recalls', 'alert', 'warning', 'contamination', 'salmonella', 'e.coli', 'listeria', 'outbreak'];
-  
+
+  const isIngredientQuery = ingredientKeywords.some(k => lower.includes(k));
+  const isHealthQuery = healthKeywords.some(k => lower.includes(k));
   const isSafetyQuery = safetyKeywords.some(k => lower.includes(k));
   const isRecallQuery = recallKeywords.some(k => lower.includes(k));
-  
-  // Default to recall if neither is clear
+
+  if (isIngredientQuery) return 'INGREDIENT';
+  if (isHealthQuery) return 'HEALTH';
   if (isSafetyQuery && !isRecallQuery) return 'SAFETY';
   return 'RECALL';
 }
@@ -380,9 +670,31 @@ export async function POST(request) {
       );
     }
 
+    // Normalize the user input
+    const normalizedQuery = normalizeQuery(rumorText);
+
     // Step 1: Extract entities
-    const { Brand, ProductType, Concern } = await extractEntities(rumorText);
+    let { Brand, ProductType, Concern } = await extractEntities(normalizedQuery);
     console.log(`🔍 Extracted: Brand="${Brand}", Product="${ProductType}", Concern="${Concern}"`);
+
+    // If extraction failed, try to extract from the raw query
+    if (Brand === 'Unknown' && ProductType === 'Unknown') {
+      // Try to extract brand from raw query using patterns
+      const brandMatch = rumorText.match(/([A-Z][a-zA-Z]+(?:,?\s*(?:Inc|LLC|Ltd|Corp|Company|Foods|Service|Group|Brand))?\s*)/);
+      if (brandMatch) {
+        Brand = brandMatch[1].trim();
+        console.log(`🔍 Fallback: Extracted brand "${Brand}" from raw query`);
+      }
+
+      // Try to extract concern from raw query
+      const concernKeywords = ['salmonella', 'e.coli', 'listeria', 'recall', 'contamination', 'allergen'];
+      concernKeywords.forEach(keyword => {
+        if (rumorText.toLowerCase().includes(keyword) && Concern === 'Unknown') {
+          Concern = keyword;
+          console.log(`🔍 Fallback: Extracted concern "${Concern}" from raw query`);
+        }
+      });
+    }
 
     // Step 1b: Check if this is gibberish or unrelated to food
     const foodKeywords = ['food', 'product', 'recall', 'safe', 'eat', 'drink', 'allergy', 'contamination', 'salmonella', 'e.coli', 'listeria', 'peanut', 'milk', 'egg', 'soy', 'wheat', 'fish', 'shellfish', 'meat', 'poultry', 'dairy', 'bread', 'cereal', 'snack', 'drink', 'beverage', 'fruit', 'vegetable', 'chicken', 'beef', 'pork', 'jif', 'tyson', 'goldfish', 'peanut butter'];
@@ -423,74 +735,9 @@ export async function POST(request) {
       });
     }
 
-    // Step 2: Query FDA — Multi-stage search strategy
-    let fdaResults = [];
-    let usedUrl = '';
-
-    // Stage 1: Exact match using product_description
-    const exactQuery = `"${Brand} ${ProductType}"`.trim();
-    const exactUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:${encodeURIComponent(exactQuery)}&limit=5`;
-
-    let response = await fetch(exactUrl, {
-      headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      fdaResults = data.results || [];
-      usedUrl = exactUrl;
-      console.log('📊 Stage 1 (exact):', fdaResults.length, 'results');
-    }
-
-    // Stage 2: If no results, try brand_name field only (if Brand is known)
-    if (fdaResults.length === 0 && Brand !== 'Unknown') {
-      const brandUrl = `https://api.fda.gov/food/enforcement.json?search=brand_name:"${encodeURIComponent(Brand)}"&limit=5`;
-      response = await fetch(brandUrl, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        fdaResults = data.results || [];
-        usedUrl = brandUrl;
-        console.log('📊 Stage 2 (brand_name):', fdaResults.length, 'results');
-      }
-    }
-
-    // Stage 3: If still no results, try product_description with just the Brand
-    if (fdaResults.length === 0 && Brand !== 'Unknown') {
-      const brandOnlyUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(Brand)}"&limit=5`;
-      response = await fetch(brandOnlyUrl, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        fdaResults = data.results || [];
-        usedUrl = brandOnlyUrl;
-        console.log('📊 Stage 3 (product_description brand only):', fdaResults.length, 'results');
-      }
-    }
-
-    // Stage 4: If still nothing, try product_description with just the Product Type (e.g., "peanut butter")
-    if (fdaResults.length === 0 && ProductType !== 'Unknown') {
-      const typeUrl = `https://api.fda.gov/food/enforcement.json?search=product_description:"${encodeURIComponent(ProductType)}"&limit=5`;
-      response = await fetch(typeUrl, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENFDA_API_KEY}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        fdaResults = data.results || [];
-        usedUrl = typeUrl;
-        console.log('📊 Stage 4 (product_description product type):', fdaResults.length, 'results');
-      }
-    }
-
-    console.log(`📊 FDA Results: ${fdaResults.length}`);
-
-    // --- Step 2b: Check if this is a health risk query (WHO) ---
-    const isHealthQuery = await queryWHO(rumorText);
-
-    // --- Step 3: Query ALL sources in parallel ---
+    // Step 2: Query ALL sources in parallel with new robust functions
     let [
+      fdaResults,
       usdaResults,
       ukResults,
       cfiaResults,
@@ -498,15 +745,19 @@ export async function POST(request) {
       rasffResults,
       cdcResults
     ] = await Promise.all([
-      queryUSDA(Brand),
-      queryUKFSA(Brand),
-      queryCFIA(Brand),
+      queryFDA(Brand, ProductType, Concern),
+      queryUSDA(Brand, Concern),
+      queryUKFSA(Brand, Concern),
+      queryCFIA(Brand, Concern),
       queryOpenFoodFacts(Brand),
       queryRASFF(Brand),
       queryCDC(Brand)
     ]);
 
-    // --- Step 4: Collect sources with data for AI analysis (reduces token usage) ---
+    // --- Step 2b: Check if this is a health risk query (WHO) ---
+    const isHealthQuery = await queryWHO(rumorText);
+
+    // --- Step 3: Collect sources with data for AI analysis (reduces token usage) ---
     const extractedEntities = { Brand, ProductType, Concern };
     const whoResults = isHealthQuery ? [{ health_alert: true }] : [];
 
@@ -534,12 +785,13 @@ export async function POST(request) {
     // Sources without data are automatically inconclusive
     const sourcesWithoutData = 8 - sourcesWithData.length;
 
-    // Count verdicts (AI already handles intent reasoning)
+    // Count verdicts (apply verdict mapping for query intent)
     let agrees = 0, disagrees = 0, inconclusive = 0;
 
     analyses.forEach(a => {
-      if (a.verdict === 'AGREES') agrees++;
-      else if (a.verdict === 'DISAGREES') disagrees++;
+      const mappedVerdict = mapVerdictToAgreeDisagree(a.verdict, queryIntent);
+      if (mappedVerdict === 'AGREES') agrees++;
+      else if (mappedVerdict === 'DISAGREES') disagrees++;
       else inconclusive++;
     });
 
@@ -559,8 +811,9 @@ export async function POST(request) {
     // Recalculate counts after fallback
     agrees = 0; disagrees = 0; inconclusive = 0;
     analyses.forEach(a => {
-      if (a.verdict === 'AGREES') agrees++;
-      else if (a.verdict === 'DISAGREES') disagrees++;
+      const mappedVerdict = mapVerdictToAgreeDisagree(a.verdict, queryIntent);
+      if (mappedVerdict === 'AGREES') agrees++;
+      else if (mappedVerdict === 'DISAGREES') disagrees++;
       else inconclusive++;
     });
     inconclusive += sourcesWithoutData;
