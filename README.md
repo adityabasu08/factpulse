@@ -6,7 +6,7 @@
 
 ## 🚀 Live Demo
 
-[https://factpulse.vercel.app](https://factpulse.vercel.app)
+[https://factpulse-eight.vercel.app/](https://factpulse-eight.vercel.app/)
 
 ---
 
