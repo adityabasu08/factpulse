@@ -354,7 +354,7 @@ export default function EpicureanApp() {
                     <div className="flex items-center justify-center w-44 h-44 rounded-full border-[5px] border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800">
                       <div className="text-center">
                         <span className="text-5xl font-bold text-gray-400 dark:text-gray-500">0%</span>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 tracking-wide">Confidence Score</p>
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">Evidence Strength</p>
                       </div>
                     </div>
                   </div>
@@ -378,10 +378,13 @@ export default function EpicureanApp() {
                     </div>
                   </div>
 
-                  {/* Source Count */}
-                  <div className="text-center mt-8">
-                    <p className="text-sm text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                      0 out of 8 sources agree
+                  {/* Source Count — Proper spacing */}
+                  <div className="text-center mt-4">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">0</span>
+                      {' '}out of{' '}
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">8</span>
+                      {' '}sources agree
                     </p>
                   </div>
                 </div>
@@ -397,7 +400,7 @@ export default function EpicureanApp() {
                         <span className="text-5xl font-bold text-blue-600 dark:text-blue-400">
                           {resultData.confidence !== undefined ? `${resultData.confidence}%` : '0%'}
                         </span>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 tracking-wide">Confidence Score</p>
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">Evidence Strength</p>
                       </div>
                     </div>
                   </div>
@@ -427,10 +430,13 @@ export default function EpicureanApp() {
                     </div>
                   </div>
 
-                  {/* Source Count */}
-                  <div className="text-center mt-8">
-                    <p className="text-sm text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                      {resultData.sourcesWithMatches || 0} out of {resultData.totalSourcesChecked || 8} sources agree
+                  {/* Source Count — Proper spacing */}
+                  <div className="text-center mt-4">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">{resultData.sourcesWithMatches || 0}</span>
+                      {' '}out of{' '}
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">{resultData.totalSourcesChecked || 8}</span>
+                      {' '}sources agree
                     </p>
                   </div>
                 </div>

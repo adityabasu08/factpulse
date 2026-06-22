@@ -48,29 +48,24 @@ async function callLLM(systemPrompt, userText) {
 
 // MODULE 1: ENTITY EXTRACTION
 async function extractEntities(rumorText) {
-  const systemPrompt = `You are a precise data extraction assistant. You must extract Brand, Product Type, and Concern from ANY user query — even if it is:
+  const systemPrompt = `You are a precise data extraction assistant.
 
-- **No spaces**: "isCaitoFoodsService.Increcalledforsalmonella"
-- **CamelCase**: "doesJifPeanutButterCauseCancer"
-- **Missing punctuation**: "istysonchickensafe"
-- **Mixed formatting**: "isKeurigDrPeppercontainssugar?"
+Extract the following fields:
+1. "Brand": The brand mentioned
+2. "Product Type": The product type
+3. "Concern": The **core substance/ingredient** being asked about (e.g., "sugar", "plastic", "salmonella")
 
-**Your task:** Parse the query by recognizing patterns:
-
-- **Brand**: Look for capitalized words, company suffixes (Inc, LLC, Corp, Foods, Service, Group, Brands, Company, etc.), and recognizable brand names (Jif, Tyson, Keurig, Caito, etc.).
-- **Product Type**: Look for common food/product terms (peanut butter, chicken, bread, ice cream, cereal, etc.).
-- **Concern**: Look for safety/health terms (salmonella, recall, contamination, plastic, sugar, cancer, E. coli, listeria, allergen, etc.).
-
-**CRITICAL RULES:**
-1. Even if the query has NO spaces, you can split it by recognizing capitalized letters, suffixes, and known terms.
-2. If multiple brands or products are possible, choose the most plausible one.
-3. If a field is not present, set it to "Unknown".
-4. Output ONLY a valid JSON object with keys: "Brand", "Product Type", "Concern".
+**CRITICAL:** Remove qualifiers like "excess", "too much", "zero", "free" from the concern.
+- "excess sugar" → "sugar"
+- "zero sugar" → "sugar"
+- "contains sugar" → "sugar"
+- "plastic contamination" → "plastic"
+- "salmonella" → "salmonella"
 
 **EXAMPLES:**
 
-Input: "isCaitoFoodsService.Increcalledforsalmonella"
-→ {"Brand": "Caito Foods Service, Inc.", "Product Type": "Unknown", "Concern": "salmonella"}
+Input: "doeskeurigdrpeppercontainsexcesssugar"
+→ {"Brand": "Keurig Dr Pepper", "Product Type": "Unknown", "Concern": "sugar"}
 
 Input: "doesJifpeanutbuttercausecancer"
 → {"Brand": "Jif", "Product Type": "peanut butter", "Concern": "cancer"}
@@ -80,15 +75,6 @@ Input: "isTysonchickensafe"
 
 Input: "isKeurigDrPeppercontainssugar"
 → {"Brand": "Keurig Dr Pepper", "Product Type": "Unknown", "Concern": "sugar"}
-
-Input: "issmithfieldbaconrecalled"
-→ {"Brand": "Smithfield", "Product Type": "bacon", "Concern": "recalled"}
-
-Input: "recallonperdueturkry"
-→ {"Brand": "Perdue", "Product Type": "turkey", "Concern": "recall"}
-
-Input: "isbreadsafe"
-→ {"Brand": "Unknown", "Product Type": "bread", "Concern": "safe"}
 
 Input: "doesbreadhaveplastic"
 → {"Brand": "Unknown", "Product Type": "bread", "Concern": "plastic"}
@@ -516,6 +502,26 @@ function mapVerdictToAgreeDisagree(aiVerdict, queryIntent) {
 }
 
 // =========================================
+// HELPER: Keyword Fallback
+// =========================================
+function keywordFallback(sourceData, concern, sourceName) {
+  if (!concern || concern === 'Unknown') return null;
+  if (!sourceData || sourceData.length === 0) return null;
+  
+  const concernLower = concern.toLowerCase();
+  const matched = sourceData.some(item => {
+    const text = JSON.stringify(item).toLowerCase();
+    return text.includes(concernLower);
+  });
+  
+  if (matched) {
+    console.log(`🔄 Fallback: ${sourceName} matches "${concern}" → AGREE`);
+    return 'AGREES';
+  }
+  return null;
+}
+
+// =========================================
 // QUERY NORMALIZATION
 // =========================================
 function normalizeQuery(query) {
@@ -558,29 +564,17 @@ async function analyzeSourceWithAI(sourceName, sourceData, userQuery, extractedE
 
   const systemPrompt = `You are a fact-checker. Analyze the source data and decide if it AGREES or DISAGREES with the user's claim.
 
-**Query Types:**
-- RECALL: "Is X recalled?" → Check if a recall exists
-- SAFETY: "Is X safe?" → Check if a recall exists (recall = not safe)
-- HEALTH: "Does X cause cancer/disease?" → Check if the source mentions the health risk
-- INGREDIENT: "Does X contain Y?" → Check if the source mentions the ingredient/substance
-
-**INGREDIENT QUERIES (e.g., "Does X contain sugar?"):**
-- AGREES: The source confirms the product contains the ingredient (e.g., recall says "actually contains sugar")
-- DISAGREES: The source says the product does NOT contain the ingredient
-- INCONCLUSIVE: The source has no mention of the ingredient
+**CRITICAL RULES:**
+1. Understand the user's ACTUAL question
+2. Match SEMANTICALLY, not just exact text
+3. "contains sugar", "excess sugar", "has sugar" → all mean the same thing
+4. "zero sugar", "sugar-free" → mean NO sugar (opposite)
 
 **EXAMPLES:**
-- Claim: "Does Keurig Dr Pepper contain sugar?" 
-  → FDA recall: "Zero Sugar products may contain sugar" 
-  → AGREES (contains sugar)
-
-- Claim: "Does product contain gluten?"
-  → FDA data: no mention of gluten
-  → INCONCLUSIVE
-
-- User: "Is Jif peanut butter safe?" → FDA: recall found → DISAGREE
-- User: "Is Jif peanut butter recalled?" → FDA: recall found → AGREE
-- User: "Is bread safe?" → FDA: no data → INCONCLUSIVE
+- Claim: "Does X contain sugar?" → Source: "X may contain sugar" → AGREES
+- Claim: "Does X contain excess sugar?" → Source: "X may contain sugar" → AGREES
+- Claim: "Does X contain zero sugar?" → Source: "X may contain sugar" → DISAGREES
+- Claim: "Does X contain sugar?" → Source: "X is sugar-free" → DISAGREES
 
 Return: {"verdict": "AGREES"|"DISAGREES"|"INCONCLUSIVE", "reason": "..."}`;
 
@@ -781,6 +775,17 @@ export async function POST(request) {
     );
 
     const analyses = await Promise.all(analysisPromises);
+
+    // Fallback: If AI returns INCONCLUSIVE, use keyword matching
+    sourcesWithData.forEach((s, i) => {
+      if (analyses[i].verdict === 'INCONCLUSIVE') {
+        const fallbackVerdict = keywordFallback(s.data, extractedEntities.Concern, s.name);
+        if (fallbackVerdict) {
+          analyses[i].verdict = fallbackVerdict;
+          analyses[i].reason = 'Keyword fallback match';
+        }
+      }
+    });
 
     // Sources without data are automatically inconclusive
     const sourcesWithoutData = 8 - sourcesWithData.length;
